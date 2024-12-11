@@ -57,6 +57,16 @@ npm run watch
 
 ## Installation
 
+### Using mcp-get
+
+You can install this package using mcp-get:
+
+```bash
+npx @michaellatman/mcp-get@latest install mcp-mongo-server
+```
+
+### Using Claude Desktop
+
 To use with Claude Desktop, add the server config:
 
 On MacOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
