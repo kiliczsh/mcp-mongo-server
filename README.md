@@ -1,9 +1,9 @@
 # MCP MongoDB Server
 ---
 ![NPM Version](https://img.shields.io/npm/v/mcp-mongo-server)
-[![smithery badge](https://smithery.ai/badge/mcp-mongo-server)](https://smithery.ai/protocol/mcp-mongo-server)
 ![NPM Downloads](https://img.shields.io/npm/dm/mcp-mongo-server)
 ![NPM License](https://img.shields.io/npm/l/mcp-mongo-server)
+[![smithery badge](https://smithery.ai/badge/mcp-mongo-server)](https://smithery.ai/protocol/mcp-mongo-server)
 
 A Model Context Protocol server that provides access to MongoDB databases. This server enables LLMs to inspect collection schemas and execute read-only queries.
 
@@ -104,22 +104,6 @@ The server provides schema information for each collection in the database:
   - Automatically inferred from collection documents
 
 
-### Installing via Smithery
-
-To install MCP MongoDB Server for Claude Desktop automatically via [Smithery](https://smithery.ai/protocol/mcp-mongo-server):
-
-```bash
-npx @smithery/cli install mcp-mongo-server --client claude
-```
-
-## Using mcp-get
-
-You can install this package using mcp-get:
-
-```bash
-npx @michaellatman/mcp-get@latest install mcp-mongo-server
-```
-
 ## Usage with Claude Desktop
 
 To use this server with the Claude Desktop app, add the following configuration to the "mcpServers" section of your `claude_desktop_config.json`:
@@ -137,6 +121,22 @@ To use this server with the Claude Desktop app, add the following configuration 
     }
   }
 }
+```
+
+### Installing via Smithery
+
+To install MCP MongoDB Server for Claude Desktop automatically via [Smithery](https://smithery.ai/protocol/mcp-mongo-server):
+
+```bash
+npx @smithery/cli install mcp-mongo-server --client claude
+```
+
+### Installing via mcp-get
+
+You can install this package using mcp-get:
+
+```bash
+npx @michaellatman/mcp-get@latest install mcp-mongo-server
 ```
 
 Replace `/sample_namespace` with your database name.
