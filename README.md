@@ -1,6 +1,7 @@
 # MCP MongoDB Server
 ---
 ![NPM Version](https://img.shields.io/npm/v/mcp-mongo-server)
+[![smithery badge](https://smithery.ai/badge/mcp-mongo-server)](https://smithery.ai/protocol/mcp-mongo-server)
 ![NPM Downloads](https://img.shields.io/npm/dm/mcp-mongo-server)
 ![NPM License](https://img.shields.io/npm/l/mcp-mongo-server)
 
@@ -102,6 +103,14 @@ The server provides schema information for each collection in the database:
   - Includes field names and data types
   - Automatically inferred from collection documents
 
+
+### Installing via Smithery
+
+To install MCP MongoDB Server for Claude Desktop automatically via [Smithery](https://smithery.ai/protocol/mcp-mongo-server):
+
+```bash
+npx @smithery/cli install mcp-mongo-server --client claude
+```
 
 ## Using mcp-get
 
