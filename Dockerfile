@@ -29,8 +29,9 @@ COPY --from=builder /app/build ./build
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 
-# Define the entrypoint for the container
-ENTRYPOINT ["node", "build/index.js"]
+# Copy an entrypoint script to handle environment variable logic
+COPY ./docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
-# Command to run the server, update this to use your MongoDB URI
-CMD ["mongodb://muhammed:kilic@mongodb.localhost/sample_namespace"]
+# Define the entrypoint script
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
