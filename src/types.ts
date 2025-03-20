@@ -118,7 +118,7 @@ export type MongoDistinctTool = z.infer<typeof MongoDistinctToolSchema>;
 // MongoDB Call Tool Request Schema
 export const MongoCallToolRequestSchema = CallToolRequestSchema.extend({
     params: z.object({
-        name: z.enum(["query", "aggregate", "count", "distinct"]),
+        name: z.enum(["query", "aggregate", "count", "distinct", "listCollections"]),
         arguments: z.union([
             MongoQueryToolSchema.shape.inputSchema,
             MongoAggregateToolSchema.shape.inputSchema,

@@ -422,6 +422,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["collection"],
         },
       },
+      {
+        name: "listCollections",
+        description: "List all collections in the MongoDB database",
+        inputSchema: {
+          type: "object",
+          properties: {
+            nameOnly: {
+              type: "boolean",
+              description: "Optional: If true, returns only the collection names instead of full collection info"
+            },
+            filter: {
+              type: "object", 
+              description: "Optional: Filter to apply to the collections"
+            }
+          }
+        }
+      },
     ],
   };
 });
@@ -986,8 +1003,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
     }
 
+    case "listCollections": {
+      const { nameOnly, filter } = request.params.arguments || {};
+      
+      try {
+        // Get the list of collections
+        const options = filter ? { filter } : {};
+        const collections = await db.listCollections(options).toArray();
+        
+        // If nameOnly is true, return only the collection names
+        const result = nameOnly
+          ? collections.map((collection: any) => collection.name)
+          : collections;
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        if (error instanceof Error) {
+          throw new Error(`Failed to list collections: ${error.message}`);
+        }
+        throw new Error("Failed to list collections: Unknown error");
+      }
+    }
+
     default:
-      throw new Error("Unknown tool");
+      throw new Error(`Unknown tool: ${request.params.name}`);
   }
 });
 
