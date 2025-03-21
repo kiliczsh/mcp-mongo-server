@@ -13,6 +13,12 @@ A Model Context Protocol server that provides access to MongoDB databases. This 
 
 ## Features
 
+### Read-Only Mode
+- Connect to MongoDB in read-only mode with `--read-only` or `-r` flag
+- Prevents write operations (update, insert, createIndex)
+- Uses MongoDB's secondary read preference for optimal read performance
+- Provides additional safety for production database connections
+
 ### Resources
 - List and access collections via `mongodb://` URIs
 - Each collection has a name, description and schema
@@ -97,6 +103,14 @@ On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
         "mongodb://muhammed:kilic@mongodb.localhost/namespace"
       ]
     },
+    "mongodb-readonly": {
+      "command": "node",
+      "args": [
+        "~/mcp-mongo-server/build/index.js",
+        "mongodb://muhammed:kilic@mongodb.localhost/namespace",
+        "--read-only"
+      ]
+    }
   }
 }
 ```
@@ -139,6 +153,15 @@ To use this server with the Claude Desktop app, add the following configuration 
         "mcp-mongo-server",
         "mongodb://muhammed:kilic@mongodb.localhost/sample_namespace"
       ]
+    },
+    "mongodb-readonly": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-mongo-server",
+        "mongodb://muhammed:kilic@mongodb.localhost/sample_namespace",
+        "--read-only"
+      ]
     }
   }
 }
@@ -161,6 +184,21 @@ npx @michaellatman/mcp-get@latest install mcp-mongo-server
 ```
 
 Replace `/sample_namespace` with your database name.
+
+## Using Read-Only Mode
+
+You can connect to MongoDB in read-only mode by adding the `--read-only` or `-r` flag when starting the server. This is recommended when you need to protect your data from accidental writes or when connecting to production databases.
+
+```bash
+# Connect in read-only mode using the command line
+npx mcp-mongo-server mongodb://user:password@mongodb.example.com/database --read-only
+```
+
+When in read-only mode:
+1. All write operations (update, insert, createIndex) will be blocked
+2. The server connects using MongoDB's secondary read preference
+3. The connection status indicates read-only mode is active
+4. The `ping` and `serverInfo` responses include read-only status information
 
 ## License
 
