@@ -463,7 +463,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   
   // Check if the operation is a write operation and we're in read-only mode
   if (isReadOnlyMode && writeOperations.includes(request.params.name)) {
-    throw new Error(`Operation '${request.params.name}' is not allowed in read-only mode`);
+    throw new Error(`ReadonlyError: Operation '${request.params.name}' is not allowed in read-only mode`);
   }
 
   switch (request.params.name) {
