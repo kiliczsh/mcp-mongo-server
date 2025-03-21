@@ -21,7 +21,7 @@ import {
   ListResourceTemplatesRequestSchema,
   PingRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { MongoClient } from "mongodb";
+import { MongoClient, ReadPreference } from "mongodb";
 import { MongoCollection } from "./types.js";
 
 /**
@@ -29,6 +29,10 @@ import { MongoCollection } from "./types.js";
  */
 let client: MongoClient | null = null;
 let db: any = null;
+/**
+ * Flag indicating whether the connection is in read-only mode
+ */
+let isReadOnlyMode = false;
 
 /**
  * Create an MCP server with capabilities for resources (to list/read collections),
@@ -51,11 +55,13 @@ const server = new Server(
 /**
  * Initialize MongoDB connection
  */
-async function connectToMongoDB(url: string) {
+async function connectToMongoDB(url: string, readOnly: boolean = false) {
   try {
-    client = new MongoClient(url);
+    const options = readOnly ? { readPreference: ReadPreference.SECONDARY } : {};
+    client = new MongoClient(url, options);
     await client.connect();
     db = client.db();
+    isReadOnlyMode = readOnly;
     return true;
   } catch (error) {
     console.error("Failed to connect to MongoDB:", error);
@@ -76,7 +82,9 @@ server.setRequestHandler(PingRequestSchema, async () => {
     // Ping MongoDB to verify connection
     await db.command({ ping: 1 });
 
-    return {};
+    return {
+      readOnlyMode: isReadOnlyMode
+    };
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`MongoDB ping failed: ${error.message}`);
@@ -449,6 +457,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
  */
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const collection = db.collection(request.params.arguments?.collection);
+  
+  // Define write operations that should be blocked in read-only mode
+  const writeOperations = ['update', 'insert', 'createIndex'];
+  
+  // Check if the operation is a write operation and we're in read-only mode
+  if (isReadOnlyMode && writeOperations.includes(request.params.name)) {
+    throw new Error(`ReadonlyError: Operation '${request.params.name}' is not allowed in read-only mode`);
+  }
 
   switch (request.params.name) {
     case "query": {
@@ -714,6 +730,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           bits: buildInfo.bits,
           ok: buildInfo.ok,
           status: {},
+          connectionInfo: {
+            readOnlyMode: isReadOnlyMode,
+            readPreference: isReadOnlyMode ? 'secondary' : 'primary'
+          }
         };
 
         // Add server status information if requested
@@ -1181,14 +1201,28 @@ Use these patterns to construct MongoDB queries.`,
  */
 async function main() {
   const args = process.argv.slice(2);
-  if (args.length === 0) {
+  let connectionUrl = '';
+  let readOnlyMode = false;
+  
+  // Parse command line arguments
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--read-only' || args[i] === '-r') {
+      readOnlyMode = true;
+    } else if (!connectionUrl) {
+      connectionUrl = args[i];
+    }
+  }
+  
+  if (!connectionUrl) {
     console.error(
-      "Please provide a MongoDB connection URL as a command-line argument",
+      "Please provide a MongoDB connection URL as a command-line argument"
     );
+    console.error("Usage: command <mongodb-url> [--read-only|-r]");
     process.exit(1);
   }
 
-  const connected = await connectToMongoDB(args[0]);
+  console.log(`Connecting to MongoDB${readOnlyMode ? ' in read-only mode' : ''}...`);
+  const connected = await connectToMongoDB(connectionUrl, readOnlyMode);
   if (!connected) {
     console.error("Failed to connect to MongoDB");
     process.exit(1);
