@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     env:
@@ -52,6 +52,14 @@ jobs:
 
           echo "Using version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Create Git Tag
+        if: github.event_name != 'release'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git tag -a "$VERSION" -m "Version $VERSION"
+          git push https://${{ secrets.NODE_AUTH_TOKEN }}@github.com/kiliczsh/mcp-mongo-server.git "$VERSION"
 
       - name: Update package.json version and publishConfig
         run: |
