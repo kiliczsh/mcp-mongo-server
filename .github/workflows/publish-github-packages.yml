@@ -1,0 +1,63 @@
+name: Publish @kiliczsh/mcp-mongo-server
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+
+  publish-gpr:
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      STATIC_VERSION: "1.0.0"
+      BUILD_ID: ${{ github.run_number }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://npm.pkg.github.com/
+      - run: cp .npmrc-github .npmrc
+      - name: Determine Version
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="${STATIC_VERSION}-build.${BUILD_ID}"
+          fi
+
+          echo "Using version: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Update package.json version and publishConfig
+        run: |
+          sed -i 's/"name": "mcp-mongo-server"/"name": "@kiliczsh\/mcp-mongo-server"/' package.json
+          jq --arg version "$VERSION" '.version = $version' package.json > package.tmp.json && mv package.tmp.json package.json
+
+          echo '{
+            "access": "public",
+            "registry": "https://npm.pkg.github.com"
+          }' > publishConfig.json
+
+          jq -s '.[0] * {publishConfig: .[1]}' package.json publishConfig.json > package.tmp.json && mv package.tmp.json package.json
+
+      - run: npm ci
+      - run: npm publish --registry=https://npm.pkg.github.com
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.NODE_AUTH_TOKEN}}
