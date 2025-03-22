@@ -1221,7 +1221,6 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`Connecting to MongoDB${readOnlyMode ? ' in read-only mode' : ''}...`);
   const connected = await connectToMongoDB(connectionUrl, readOnlyMode);
   if (!connected) {
     console.error("Failed to connect to MongoDB");
