@@ -13,21 +13,23 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-  ReadResourceRequestSchema,
-  ListPromptsRequestSchema,
   GetPromptRequestSchema,
+  ListPromptsRequestSchema,
+  ListResourcesRequestSchema,
   ListResourceTemplatesRequestSchema,
+  ListToolsRequestSchema,
   PingRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { MongoClient, ReadPreference } from "mongodb";
+// Update the import statement to handle CommonJS module
+import mongodb from "mongodb";
 import { MongoCollection } from "./types.js";
+const { MongoClient, ReadPreference } = mongodb;
 
 /**
  * MongoDB connection client and database reference
  */
-let client: MongoClient | null = null;
+let client: InstanceType<typeof MongoClient> | null = null;
 let db: any = null;
 /**
  * Flag indicating whether the connection is in read-only mode
@@ -230,6 +232,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             pipeline: {
               type: "array",
               description: "Aggregation pipeline stages",
+              items: {
+                type: "object",
+                description: "A single stage in the aggregation pipeline",
+              },
             },
             explain: {
               type: "string",
