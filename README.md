@@ -1,3 +1,6 @@
+# THIS IS A HACKY FORK OF https://github.com/kiliczsh/mcp-mongo-server that SUPPORTS MONGO<4.0
+
+
 # MCP MongoDB Server
 ---
 ![NPM Version](https://img.shields.io/npm/v/mcp-mongo-server)

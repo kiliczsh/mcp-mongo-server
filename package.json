@@ -18,8 +18,7 @@
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "0.6.0",
-        "@types/mongodb": "^4.0.6",
-        "mongodb": "^6.11.0",
+        "mongodb": "^3.6.10",
         "zod": "^3.23.8"
     },
     "devDependencies": {
