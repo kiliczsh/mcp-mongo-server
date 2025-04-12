@@ -36,7 +36,7 @@ export function createServer(
   const server = new Server(
     {
       name: "mongodb",
-      version: "1.1.2",
+      version: "1.2.0",
       ...options,
     },
     {
