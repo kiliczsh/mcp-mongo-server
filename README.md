@@ -1,113 +1,162 @@
 # MCP MongoDB Server
 ---
+
 ![NPM Version](https://img.shields.io/npm/v/mcp-mongo-server)
 ![NPM Downloads](https://img.shields.io/npm/dm/mcp-mongo-server)
 ![NPM License](https://img.shields.io/npm/l/mcp-mongo-server)
 [![smithery badge](https://smithery.ai/badge/mcp-mongo-server)](https://smithery.ai/server/mcp-mongo-server)
 
-A Model Context Protocol server that provides access to MongoDB databases. This server enables LLMs to inspect collection schemas and execute MongoDB operations.
+A Model Context Protocol server that enables LLMs to interact with MongoDB databases. This server provides capabilities for inspecting collection schemas and executing MongoDB operations through a standardized interface.
 
 ## Demo
 
 [![MCP MongoDB Server Demo | Claude Desktop](https://img.youtube.com/vi/FI-oE_voCpA/0.jpg)](https://www.youtube.com/watch?v=FI-oE_voCpA)
 
-## Features
+## Key Features
+
+### Smart ObjectId Handling
+- Intelligent conversion between string IDs and MongoDB ObjectId
+- Configurable with `objectIdMode` parameter:
+  - `"auto"`: Convert based on field names (default)
+  - `"none"`: No conversion
+  - `"force"`: Force all string ID fields to ObjectId
+
+### Flexible Configuration
+- **Environment Variables**:
+  - `MCP_MONGODB_URI`: MongoDB connection URI
+  - `MCP_MONGODB_READONLY`: Enable read-only mode when set to "true"
+- **Command-line Options**:
+  - `--read-only` or `-r`: Connect in read-only mode
 
 ### Read-Only Mode
-- Connect to MongoDB in read-only mode with `--read-only` or `-r` flag
-- Prevents write operations (update, insert, createIndex)
-- Uses MongoDB's secondary read preference for optimal read performance
-- Provides additional safety for production database connections
+- Protection against write operations (update, insert, createIndex)
+- Uses MongoDB's secondary read preference for optimal performance
+- Ideal for safely connecting to production databases
 
-### Resources
-- List and access collections via `mongodb://` URIs
-- Each collection has a name, description and schema
-- JSON mime type for schema access
+### MongoDB Operations
+- **Read Operations**:
+  - Query documents with optional execution plan analysis
+  - Execute aggregation pipelines
+  - Count documents matching criteria
+  - Get collection schema information
+- **Write Operations** (when not in read-only mode):
+  - Update documents
+  - Insert new documents
+  - Create indexes
 
-### Tools
-- **query**
-  - Execute MongoDB queries with optional execution plan analysis
-  - Input: Collection name, filter, projection, limit, explain options
-  - Returns query results or execution plan
+### LLM Integration
+- Collection completions for enhanced LLM interaction
+- Schema inference for improved context understanding
+- Collection analysis for data insights
 
-- **aggregate**
-  - Execute MongoDB aggregation pipelines with optional execution plan analysis
-  - Input: Collection name, pipeline stages, explain options
-  - Returns aggregation results or execution plan
+## Installation
 
-- **update**
-  - Update documents in a collection
-  - Input: Collection name, filter, update operations, upsert/multi options
-  - Returns update operation results
+### Global Installation
 
-- **serverInfo**
-  - Get MongoDB server information and status
-  - Input: Optional debug info flag
-  - Returns version, storage engine, and server details
-
-- **insert**
-  - Insert documents into a collection
-  - Input: Collection name, documents array, write options
-  - Returns insert operation results
-
-- **createIndex**
-  - Create indexes on a collection
-  - Input: Collection name, index specifications, write options
-  - Returns index creation results
-
-- **count**
-  - Count documents matching a query
-  - Input: Collection name, query filter, count options
-  - Returns document count
-
-### Prompts
-- `analyze_collection` - Analyze collection structure and contents
-  - Input: Collection name
-  - Output: Insights about schema, data types, and statistics
-
-
-## Development
-
-Install dependencies:
 ```bash
+npm install -g mcp-mongo-server
+```
+
+### For Development
+
+```bash
+# Clone repository
+git clone https://github.com/kiliczsh/mcp-mongo-server.git
+cd mcp-mongo-server
+
+# Install dependencies
 npm install
-```
 
-Build the server:
-```bash
+# Build
 npm run build
-```
 
-For development with auto-rebuild:
-```bash
+# Development with auto-rebuild
 npm run watch
 ```
 
-## Installation for Development
+## Usage
 
-### Using Claude Desktop
+### Basic Usage
 
-To use with Claude Desktop, add the server config:
+```bash
+# Start server with MongoDB URI
+npx -y mcp-mongo-server mongodb://muhammed:kilic@localhost:27017/database
 
-On MacOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+# Connect in read-only mode
+npx -y mcp-mongo-server mongodb://muhammed:kilic@localhost:27017/database --read-only
+```
 
-On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
+### Environment Variables
+
+You can configure the server using environment variables, which is particularly useful for CI/CD pipelines, Docker containers, or when you don't want to expose connection details in command arguments:
+
+```bash
+# Set MongoDB connection URI
+export MCP_MONGODB_URI="mongodb://muhammed:kilic@localhost:27017/database"
+
+# Enable read-only mode
+export MCP_MONGODB_READONLY="true"
+
+# Run server (will use environment variables if no URI is provided)
+npx -y mcp-mongo-server
+```
+
+Using environment variables in Claude Desktop configuration:
+
+```json
+{
+  "mcpServers": {
+    "mongodb-env": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-mongo-server"
+      ],
+      "env": {
+        "MCP_MONGODB_URI": "mongodb://muhammed:kilic@localhost:27017/database",
+        "MCP_MONGODB_READONLY": "true"
+      }
+    }
+  }
+}
+```
+
+Using environment variables with Docker:
+
+```bash
+docker run -e MCP_MONGODB_URI="mongodb://muhammed:kilic@localhost:27017/database" \
+           -e MCP_MONGODB_READONLY="true" \
+           mcp-mongo-server
+```
+
+## Integration with Claude Desktop
+
+### Manual Configuration
+
+Add the server configuration to Claude Desktop's config file:
+
+**MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+
+#### Command-line Arguments Approach:
 
 ```json
 {
   "mcpServers": {
     "mongodb": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "~/mcp-mongo-server/build/index.js",
-        "mongodb://muhammed:kilic@mongodb.localhost/namespace"
+        "-y",
+        "mcp-mongo-server",
+        "mongodb://muhammed:kilic@localhost:27017/database"
       ]
     },
     "mongodb-readonly": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "~/mcp-mongo-server/build/index.js",
-        "mongodb://muhammed:kilic@mongodb.localhost/namespace",
+        "-y",
+        "mcp-mongo-server",
+        "mongodb://muhammed:kilic@localhost:27017/database",
         "--read-only"
       ]
     }
@@ -115,99 +164,208 @@ On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 }
 ```
 
+#### Environment Variables Approach:
 
-### Debugging
+```json
+{
+  "mcpServers": {
+    "mongodb": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-mongo-server"
+      ],
+      "env": {
+        "MCP_MONGODB_URI": "mongodb://muhammed:kilic@localhost:27017/database"
+      }
+    },
+    "mongodb-readonly": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-mongo-server"
+      ],
+      "env": {
+        "MCP_MONGODB_URI": "mongodb://muhammed:kilic@localhost:27017/database",
+        "MCP_MONGODB_READONLY": "true"
+      }
+    }
+  }
+}
 
-Since MCP servers communicate over stdio, debugging can be challenging. We recommend using the [MCP Inspector](https://github.com/modelcontextprotocol/inspector), which is available as a package script:
+### GitHub Package Usage:
+
+```json
+{
+  "mcpServers": {
+    "mongodb": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "github:kiliczsh/mcp-mongo-server",
+        "mongodb://muhammed:kilic@localhost:27017/database"
+      ]
+    },
+    "mongodb-readonly": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "github:kiliczsh/mcp-mongo-server",
+        "mongodb://muhammed:kilic@localhost:27017/database",
+        "--read-only"
+      ]
+    }
+  }
+}
+```
+
+## Integration with Windsurf and Cursor
+
+The MCP MongoDB Server can be used with Windsurf and Cursor in a similar way to Claude Desktop.
+
+### Windsurf Configuration
+
+Add the server to your Windsurf configuration:
+
+```json
+{
+  "mcpServers": {
+    "mongodb": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-mongo-server",
+        "mongodb://muhammed:kilic@localhost:27017/database"
+      ]
+    }
+  }
+}
+```
+
+### Cursor Configuration
+
+For Cursor, add the server configuration to your settings:
+
+```json
+{
+  "mcpServers": {
+    "mongodb": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-mongo-server",
+        "mongodb://muhammed:kilic@localhost:27017/database"
+      ]
+    }
+  }
+}
+```
+
+You can also use the environment variables approach with both Windsurf and Cursor, following the same pattern shown in the Claude Desktop configuration.
+
+### Automated Installation
+
+**Using Smithery**:
+```bash
+npx -y @smithery/cli install mcp-mongo-server --client claude
+```
+
+**Using mcp-get**:
+```bash
+npx @michaellatman/mcp-get@latest install mcp-mongo-server
+```
+
+## Available Tools
+
+### Query Operations
+
+- **query**: Execute MongoDB queries
+  ```javascript
+  {
+    collection: "users",
+    filter: { age: { $gt: 30 } },
+    projection: { name: 1, email: 1 },
+    limit: 20,
+    explain: "executionStats"  // Optional
+  }
+  ```
+
+- **aggregate**: Run aggregation pipelines
+  ```javascript
+  {
+    collection: "orders",
+    pipeline: [
+      { $match: { status: "completed" } },
+      { $group: { _id: "$customerId", total: { $sum: "$amount" } } }
+    ],
+    explain: "queryPlanner"  // Optional
+  }
+  ```
+
+- **count**: Count matching documents
+  ```javascript
+  {
+    collection: "products",
+    query: { category: "electronics" }
+  }
+  ```
+
+### Write Operations
+
+- **update**: Modify documents
+  ```javascript
+  {
+    collection: "posts",
+    filter: { _id: "60d21b4667d0d8992e610c85" },
+    update: { $set: { title: "Updated Title" } },
+    upsert: false,
+    multi: false
+  }
+  ```
+
+- **insert**: Add new documents
+  ```javascript
+  {
+    collection: "comments",
+    documents: [
+      { author: "user123", text: "Great post!" },
+      { author: "user456", text: "Thanks for sharing" }
+    ]
+  }
+  ```
+
+- **createIndex**: Create collection indexes
+  ```javascript
+  {
+    collection: "users",
+    indexes: [
+      {
+        key: { email: 1 },
+        unique: true,
+        name: "email_unique_idx"
+      }
+    ]
+  }
+  ```
+
+### System Operations
+
+- **serverInfo**: Get MongoDB server details
+  ```javascript
+  {
+    includeDebugInfo: true  // Optional
+  }
+  ```
+
+## Debugging
+
+Since MCP servers communicate over stdio, debugging can be challenging. Use the MCP Inspector for better visibility:
 
 ```bash
 npm run inspector
 ```
 
-The Inspector will provide a URL to access debugging tools in your browser.
-
-## Components
-
-
-### Resources
-
-The server provides schema information for each collection in the database:
-
-- **Collection Schemas** (`mongodb://<host>/<collection>/schema`)
-  - JSON schema information for each collection
-  - Includes field names and data types
-  - Automatically inferred from collection documents
-
-
-## Usage with Claude Desktop
-
-To use this server with the Claude Desktop app, add the following configuration to the "mcpServers" section of your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "mongodb": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-mongo-server",
-        "mongodb://muhammed:kilic@mongodb.localhost/sample_namespace"
-      ]
-    },
-    "mongodb-readonly": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-mongo-server",
-        "mongodb://muhammed:kilic@mongodb.localhost/sample_namespace",
-        "--read-only"
-      ]
-    },
-    "mongodb-github": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "github:kiliczsh/mcp-mongo-server",
-        "mongodb://muhammed:kilic@mongodb.localhost/sample_namespace",
-        "--read-only"
-      ]
-    }
-  }
-}
-```
-
-### Installing via Smithery
-
-To install MCP MongoDB Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/mcp-mongo-server):
-
-```bash
-npx -y @smithery/cli install mcp-mongo-server --client claude
-```
-
-### Installing via mcp-get
-
-You can install this package using mcp-get:
-
-```bash
-npx @michaellatman/mcp-get@latest install mcp-mongo-server
-```
-
-Replace `/sample_namespace` with your database name.
-
-## Using Read-Only Mode
-
-You can connect to MongoDB in read-only mode by adding the `--read-only` or `-r` flag when starting the server. This is recommended when you need to protect your data from accidental writes or when connecting to production databases.
-
-```bash
-# Connect in read-only mode using the command line
-npx mcp-mongo-server mongodb://user:password@mongodb.example.com/database --read-only
-```
-
-When in read-only mode:
-1. All write operations (update, insert, createIndex) will be blocked
-2. The server connects using MongoDB's secondary read preference
-3. The connection status indicates read-only mode is active
-4. The `ping` and `serverInfo` responses include read-only status information
+This will provide a URL to access the debugging tools in your browser.
 
 ## License
 
