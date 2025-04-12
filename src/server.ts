@@ -8,6 +8,7 @@ import {
   GetPromptRequestSchema,
   ListResourceTemplatesRequestSchema,
   PingRequestSchema,
+  CompleteRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import {
   handleReadResourceRequest,
@@ -20,6 +21,7 @@ import { handleCallToolRequest } from "./schemas/call.js";
 import { handleListResourceTemplatesRequest } from "./schemas/templates.js";
 import { handleGetPromptRequest } from "./schemas/prompts.js";
 import type { Db, MongoClient } from "mongodb";
+import { handleCompletionRequest } from "./schemas/completion.js";
 
 /**
  * Create an MCP server with capabilities for resources (to list/read collections),
@@ -101,6 +103,13 @@ export function createServer(
    */
   server.setRequestHandler(ListResourceTemplatesRequestSchema, (request) =>
     handleListResourceTemplatesRequest({ request, client, db, isReadOnlyMode }),
+  );
+
+  /**
+   * Handler for completion requests.
+   */
+  server.setRequestHandler(CompleteRequestSchema, (request) =>
+    handleCompletionRequest({ request, client, db, isReadOnlyMode }),
   );
 
   return server;
