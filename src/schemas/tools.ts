@@ -199,7 +199,7 @@ export async function handleListToolsRequest({
               description: "Write concern for index creation",
             },
             commitQuorum: {
-              type: ["string", "number"],
+              type: "string", // Changed from ["string", "number"] to just "string"
               description: "Number of members required to create the index",
             },
           },
