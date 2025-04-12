@@ -192,6 +192,7 @@ Add the server configuration to Claude Desktop's config file:
     }
   }
 }
+```
 
 ### GitHub Package Usage:
 
