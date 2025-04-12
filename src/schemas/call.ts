@@ -42,6 +42,16 @@ type MongoOperation =
   | "count"
   | "listCollections";
 
+// Define operations that require a collection
+const COLLECTION_OPERATIONS = [
+  "query",
+  "aggregate",
+  "update",
+  "insert",
+  "createIndex",
+  "count",
+];
+
 // Define write operations that are blocked in read-only mode
 const WRITE_OPERATIONS = ["update", "insert", "createIndex"];
 
@@ -57,33 +67,34 @@ export async function handleCallToolRequest({
   isReadOnlyMode: boolean;
 }) {
   const { name, arguments: args = {} } = request.params;
-  const collectionName = args.collection as string;
+  const operation = name as MongoOperation;
 
   // Validate operation name
-  validateOperation(name as MongoOperation);
+  validateOperation(operation);
 
   // Check if operation is allowed in read-only mode
-  checkReadOnlyMode(name, isReadOnlyMode);
+  checkReadOnlyMode(operation, isReadOnlyMode);
 
-  // Get collection if needed
-  const collection: Collection<Document> | null = collectionName
-    ? db.collection(collectionName)
-    : null;
+  // Get collection only if the operation requires it
+  let collection: Collection<Document> | null = null;
 
-  // Validate collection if it exists
-  if (collection) {
-    if (!collection.collectionName) {
-      throw new Error("Collection name cannot be empty");
+  if (COLLECTION_OPERATIONS.includes(operation)) {
+    const collectionName = args.collection as string;
+
+    if (!collectionName) {
+      throw new Error(
+        `Collection name is required for '${operation}' operation`,
+      );
     }
-    if (collection.collectionName.startsWith("system.")) {
-      throw new Error("Access to system collections is not allowed");
-    }
-  } else {
-    throw new Error("Collection not found");
+
+    collection = db.collection(collectionName);
+
+    // Validate collection
+    validateCollection(collection);
   }
 
   // Route to the appropriate handler based on operation name
-  switch (name) {
+  switch (operation) {
     case "query":
       return handleQuery(collection, args);
     case "aggregate":
@@ -101,7 +112,7 @@ export async function handleCallToolRequest({
     case "listCollections":
       return handleListCollections(db, args);
     default:
-      throw new Error(`Unknown operation: ${name}`);
+      throw new Error(`Unknown operation: ${operation}`);
   }
 }
 
@@ -121,6 +132,15 @@ function validateOperation(operation: MongoOperation): void {
 
   if (!validOperations.includes(operation)) {
     throw new Error(`Unknown operation: ${operation}`);
+  }
+}
+
+function validateCollection(collection: Collection<Document>): void {
+  if (!collection.collectionName) {
+    throw new Error("Collection name cannot be empty");
+  }
+  if (collection.collectionName.startsWith("system.")) {
+    throw new Error("Access to system collections is not allowed");
   }
 }
 
@@ -182,9 +202,12 @@ function handleError(
 // Operation handlers
 
 async function handleQuery(
-  collection: Collection<Document>,
+  collection: Collection<Document> | null,
   args: Record<string, unknown>,
 ) {
+  if (!collection) {
+    throw new Error("Collection is required for query operation");
+  }
   const { filter, projection, limit, explain } = args;
   const queryFilter = parseFilter(filter);
 
@@ -213,9 +236,12 @@ async function handleQuery(
 }
 
 async function handleAggregate(
-  collection: Collection<Document>,
+  collection: Collection<Document> | null,
   args: Record<string, unknown>,
 ) {
+  if (!collection) {
+    throw new Error("Collection is required for aggregate operation");
+  }
   const { pipeline, explain } = args;
 
   if (!Array.isArray(pipeline)) {
@@ -243,9 +269,12 @@ async function handleAggregate(
 }
 
 async function handleUpdate(
-  collection: Collection<Document>,
+  collection: Collection<Document> | null,
   args: Record<string, unknown>,
 ) {
+  if (!collection) {
+    throw new Error("Collection is required for update operation");
+  }
   const { filter, update, upsert, multi } = args;
   const queryFilter = parseFilter(filter);
 
@@ -363,9 +392,12 @@ async function handleServerInfo(
 }
 
 async function handleInsert(
-  collection: Collection<Document>,
+  collection: Collection<Document> | null,
   args: Record<string, unknown>,
 ) {
+  if (!collection) {
+    throw new Error("Collection is required for insert operation");
+  }
   const { documents, ordered, writeConcern, bypassDocumentValidation } = args;
 
   // Validate documents array
@@ -419,9 +451,12 @@ async function handleInsert(
 }
 
 async function handleCreateIndex(
-  collection: Collection<Document>,
+  collection: Collection<Document> | null,
   args: Record<string, unknown>,
 ) {
+  if (!collection) {
+    throw new Error("Collection is required for createIndex operation");
+  }
   const { indexes, commitQuorum, writeConcern } = args;
 
   // Validate indexes array
@@ -471,9 +506,12 @@ async function handleCreateIndex(
 }
 
 async function handleCount(
-  collection: Collection<Document>,
+  collection: Collection<Document> | null,
   args: Record<string, unknown>,
 ) {
+  if (!collection) {
+    throw new Error("Collection is required for count operation");
+  }
   const { query, limit, skip, hint, readConcern, maxTimeMS, collation } = args;
   const countQuery = parseFilter(query);
 
