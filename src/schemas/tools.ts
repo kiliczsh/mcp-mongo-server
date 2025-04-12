@@ -39,6 +39,12 @@ export async function handleListToolsRequest({
               description: "Optional: Get query execution information",
               enum: ["queryPlanner", "executionStats", "allPlansExecution"],
             },
+            objectIdMode: {
+              type: "string",
+              description: "Control how 24-character hex strings are handled",
+              enum: ["auto", "none", "force"],
+              default: "auto",
+            },
           },
           required: ["collection"],
         },
@@ -62,6 +68,12 @@ export async function handleListToolsRequest({
               type: "string",
               description: "Optional: Get aggregation execution information",
               enum: ["queryPlanner", "executionStats", "allPlansExecution"],
+            },
+            objectIdMode: {
+              type: "string",
+              description: "Control how 24-character hex strings are handled",
+              enum: ["auto", "none", "force"],
+              default: "auto",
             },
           },
           required: ["collection", "pipeline"],
@@ -94,6 +106,12 @@ export async function handleListToolsRequest({
             multi: {
               type: "boolean",
               description: "Update multiple documents that match the filter",
+            },
+            objectIdMode: {
+              type: "string",
+              description: "Control how 24-character hex strings are handled",
+              enum: ["auto", "none", "force"],
+              default: "auto",
             },
           },
           required: ["collection", "filter", "update"],
@@ -141,6 +159,12 @@ export async function handleListToolsRequest({
             bypassDocumentValidation: {
               type: "boolean",
               description: "Allow insert to bypass schema validation",
+            },
+            objectIdMode: {
+              type: "string",
+              description: "Control how 24-character hex strings are handled",
+              enum: ["auto", "none", "force"],
+              default: "auto",
             },
           },
           required: ["collection", "documents"],
@@ -199,8 +223,14 @@ export async function handleListToolsRequest({
               description: "Write concern for index creation",
             },
             commitQuorum: {
-              type: "string", // Changed from ["string", "number"] to just "string"
+              type: "string",
               description: "Number of members required to create the index",
+            },
+            objectIdMode: {
+              type: "string",
+              description: "Control how 24-character hex strings are handled",
+              enum: ["auto", "none", "force"],
+              default: "auto",
             },
           },
           required: ["collection", "indexes"],
@@ -226,6 +256,12 @@ export async function handleListToolsRequest({
               type: "object",
               description: "Collation rules for comparison",
             },
+            objectIdMode: {
+              type: "string",
+              description: "Control how 24-character hex strings are handled",
+              enum: ["auto", "none", "force"],
+              default: "auto",
+            },
           },
           required: ["collection"],
         },
@@ -243,6 +279,12 @@ export async function handleListToolsRequest({
             filter: {
               type: "object",
               description: "Filter for collections",
+            },
+            objectIdMode: {
+              type: "string",
+              description: "Control how 24-character hex strings are handled",
+              enum: ["auto", "none", "force"],
+              default: "auto",
             },
           },
         },

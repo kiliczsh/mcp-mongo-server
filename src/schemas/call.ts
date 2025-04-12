@@ -13,6 +13,7 @@ import type {
   ReadConcernLike,
   Collection,
 } from "mongodb";
+import { ObjectId } from "mongodb";
 
 // MongoDB return type interfaces
 interface CreateIndexesResult {
@@ -55,6 +56,9 @@ const COLLECTION_OPERATIONS = [
 // Define write operations that are blocked in read-only mode
 const WRITE_OPERATIONS = ["update", "insert", "createIndex"];
 
+// ObjectId conversion settings
+type ObjectIdConversionMode = "auto" | "none" | "force";
+
 export async function handleCallToolRequest({
   request,
   client,
@@ -68,6 +72,20 @@ export async function handleCallToolRequest({
 }) {
   const { name, arguments: args = {} } = request.params;
   const operation = name as MongoOperation;
+
+  // Extract ObjectId conversion mode from args (default to 'auto')
+  const objectIdMode = (args.objectIdMode as ObjectIdConversionMode) || "auto";
+
+  // Create new args object without objectIdMode property
+  const filteredArgs: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (key !== "objectIdMode") {
+      filteredArgs[key] = value;
+    }
+  }
+
+  // Replace the original args with the filtered version
+  Object.assign(args, filteredArgs);
 
   // Validate operation name
   validateOperation(operation);
@@ -96,21 +114,21 @@ export async function handleCallToolRequest({
   // Route to the appropriate handler based on operation name
   switch (operation) {
     case "query":
-      return handleQuery(collection, args);
+      return handleQuery(collection, args, objectIdMode);
     case "aggregate":
-      return handleAggregate(collection, args);
+      return handleAggregate(collection, args, objectIdMode);
     case "update":
-      return handleUpdate(collection, args);
+      return handleUpdate(collection, args, objectIdMode);
     case "serverInfo":
       return handleServerInfo(db, isReadOnlyMode, args);
     case "insert":
-      return handleInsert(collection, args);
+      return handleInsert(collection, args, objectIdMode);
     case "createIndex":
-      return handleCreateIndex(collection, args);
+      return handleCreateIndex(collection, args, objectIdMode);
     case "count":
-      return handleCount(collection, args);
+      return handleCount(collection, args, objectIdMode);
     case "listCollections":
-      return handleListCollections(db, args);
+      return handleListCollections(db, args, objectIdMode);
     default:
       throw new Error(`Unknown operation: ${operation}`);
   }
@@ -152,24 +170,106 @@ function checkReadOnlyMode(operation: string, isReadOnlyMode: boolean): void {
   }
 }
 
-function parseFilter(filter: unknown): Filter<Document> {
+function parseFilter(
+  filter: unknown,
+  objectIdMode: ObjectIdConversionMode = "auto",
+): Filter<Document> {
   if (!filter) {
     return {};
   }
 
   if (typeof filter === "string") {
     try {
-      return JSON.parse(filter);
+      return processObjectIdInFilter(JSON.parse(filter), objectIdMode);
     } catch (e) {
       throw new Error("Invalid filter format: must be a valid JSON object");
     }
   }
 
   if (typeof filter === "object" && filter !== null && !Array.isArray(filter)) {
-    return filter as Filter<Document>;
+    // Process the filter to convert potential ObjectId strings
+    return processObjectIdInFilter(
+      filter as Record<string, unknown>,
+      objectIdMode,
+    );
   }
 
   throw new Error("Query filter must be a plain object or ObjectId");
+}
+
+// Helper function to check if a field should be treated as an ObjectId based on its name
+function isObjectIdField(fieldName: string): boolean {
+  // Convert field name to lowercase for case-insensitive comparison
+  const lowerFieldName = fieldName.toLowerCase();
+
+  // Consider fields like _id, id, xxxId, xxx_id as potential ObjectId fields
+  return (
+    lowerFieldName === "_id" ||
+    lowerFieldName === "id" ||
+    lowerFieldName.endsWith("id") ||
+    lowerFieldName.endsWith("_id")
+  );
+}
+
+// Helper function to process potential ObjectId strings in filters
+function processObjectIdInFilter(
+  filter: Record<string, unknown>,
+  objectIdMode: ObjectIdConversionMode = "auto",
+): Filter<Document> {
+  // If objectIdMode is "none", don't convert any strings to ObjectIds
+  if (objectIdMode === "none") {
+    return filter as Filter<Document>;
+  }
+
+  const result: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(filter)) {
+    if (typeof value === "string" && isObjectIdString(value)) {
+      // Convert string to ObjectId if either:
+      // 1. objectIdMode is "force" (convert all 24-char hex strings)
+      // 2. objectIdMode is "auto" AND the field name suggests it's an ObjectId
+      if (
+        objectIdMode === "force" ||
+        (objectIdMode === "auto" && isObjectIdField(key))
+      ) {
+        result[key] = new ObjectId(value);
+      } else {
+        result[key] = value;
+      }
+    } else if (typeof value === "object" && value !== null) {
+      if (Array.isArray(value)) {
+        // For arrays, apply the same logic to each item
+        if (
+          objectIdMode === "force" ||
+          (objectIdMode === "auto" && isObjectIdField(key))
+        ) {
+          result[key] = value.map((item) =>
+            typeof item === "string" && isObjectIdString(item)
+              ? new ObjectId(item)
+              : item,
+          );
+        } else {
+          result[key] = value;
+        }
+      } else {
+        // Process nested objects
+        result[key] = processObjectIdInFilter(
+          value as Record<string, unknown>,
+          objectIdMode,
+        );
+      }
+    } else {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
+// Helper function to check if a string appears to be an ObjectId
+function isObjectIdString(str: string): boolean {
+  // MongoDB ObjectId is typically a 24-character hex string
+  return /^[0-9a-fA-F]{24}$/.test(str);
 }
 
 function formatResponse(data: unknown): {
@@ -204,12 +304,13 @@ function handleError(
 async function handleQuery(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
+  objectIdMode: ObjectIdConversionMode = "auto",
 ) {
   if (!collection) {
     throw new Error("Collection is required for query operation");
   }
   const { filter, projection, limit, explain } = args;
-  const queryFilter = parseFilter(filter);
+  const queryFilter = parseFilter(filter, objectIdMode);
 
   try {
     if (explain) {
@@ -238,6 +339,7 @@ async function handleQuery(
 async function handleAggregate(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
+  objectIdMode: ObjectIdConversionMode = "auto",
 ) {
   if (!collection) {
     throw new Error("Collection is required for aggregate operation");
@@ -248,10 +350,21 @@ async function handleAggregate(
     throw new Error("Pipeline must be an array");
   }
 
+  // Process any ObjectId strings in the pipeline
+  const processedPipeline = pipeline.map((stage) => {
+    if (typeof stage === "object" && stage !== null) {
+      return processObjectIdInFilter(
+        stage as Record<string, unknown>,
+        objectIdMode,
+      );
+    }
+    return stage;
+  });
+
   try {
     if (explain) {
       const explainResult = await collection
-        .aggregate(pipeline, {
+        .aggregate(processedPipeline, {
           explain: {
             verbosity: explain as string,
           },
@@ -261,7 +374,7 @@ async function handleAggregate(
       return formatResponse(explainResult);
     }
 
-    const results = await collection.aggregate(pipeline).toArray();
+    const results = await collection.aggregate(processedPipeline).toArray();
     return formatResponse(results);
   } catch (error) {
     return handleError(error, "aggregate", collection.collectionName);
@@ -271,15 +384,29 @@ async function handleAggregate(
 async function handleUpdate(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
+  objectIdMode: ObjectIdConversionMode = "auto",
 ) {
   if (!collection) {
     throw new Error("Collection is required for update operation");
   }
   const { filter, update, upsert, multi } = args;
-  const queryFilter = parseFilter(filter);
+  const queryFilter = parseFilter(filter, objectIdMode);
+
+  // Process update object for potential ObjectId strings
+  let processedUpdate = update;
+  if (update && typeof update === "object" && !Array.isArray(update)) {
+    processedUpdate = processObjectIdInFilter(
+      update as Record<string, unknown>,
+      objectIdMode,
+    );
+  }
 
   // Validate update operations
-  if (!update || typeof update !== "object" || Array.isArray(update)) {
+  if (
+    !processedUpdate ||
+    typeof processedUpdate !== "object" ||
+    Array.isArray(processedUpdate)
+  ) {
     throw new Error("Update must be a valid MongoDB update document");
   }
 
@@ -296,7 +423,7 @@ async function handleUpdate(
     "$mul",
   ];
 
-  const hasValidOperator = Object.keys(update).some((key) =>
+  const hasValidOperator = Object.keys(processedUpdate).some((key) =>
     validUpdateOperators.includes(key),
   );
 
@@ -314,7 +441,11 @@ async function handleUpdate(
 
     // Use updateOne or updateMany based on multi option
     const updateMethod = options.multi ? "updateMany" : "updateOne";
-    const result = await collection[updateMethod](queryFilter, update, options);
+    const result = await collection[updateMethod](
+      queryFilter,
+      processedUpdate,
+      options,
+    );
 
     return formatResponse({
       matchedCount: result.matchedCount,
@@ -394,6 +525,7 @@ async function handleServerInfo(
 async function handleInsert(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
+  objectIdMode: ObjectIdConversionMode = "auto",
 ) {
   if (!collection) {
     throw new Error("Collection is required for insert operation");
@@ -417,6 +549,11 @@ async function handleInsert(
     throw new Error("Each document must be a valid MongoDB document object");
   }
 
+  // Process ObjectId strings in documents
+  const processedDocuments = documents.map((doc) =>
+    processObjectIdInFilter(doc as Record<string, unknown>, objectIdMode),
+  );
+
   try {
     // Type the options object correctly for BulkWriteOptions
     const options: BulkWriteOptions = {
@@ -426,7 +563,10 @@ async function handleInsert(
     };
 
     // Use insertMany for consistency, it works for single documents too
-    const result = await collection.insertMany(documents, options);
+    const result = await collection.insertMany(
+      processedDocuments as Document[],
+      options,
+    );
 
     return formatResponse({
       acknowledged: result.acknowledged,
@@ -453,6 +593,7 @@ async function handleInsert(
 async function handleCreateIndex(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
+  objectIdMode: ObjectIdConversionMode = "auto",
 ) {
   if (!collection) {
     throw new Error("Collection is required for createIndex operation");
@@ -483,13 +624,27 @@ async function handleCreateIndex(
     throw new Error("Commit quorum must be a string or number");
   }
 
+  // Process ObjectId strings in indexes
+  const processedIndexes = indexes.map((index) => {
+    if (index && typeof index === "object") {
+      return processObjectIdInFilter(
+        index as Record<string, unknown>,
+        objectIdMode,
+      );
+    }
+    return index;
+  });
+
   try {
     // Properly type createIndexes options
     const indexOptions: CreateIndexesOptions = {
       commitQuorum: typeof commitQuorum === "number" ? commitQuorum : undefined,
     };
 
-    const result = await collection.createIndexes(indexes, indexOptions);
+    const result = await collection.createIndexes(
+      processedIndexes,
+      indexOptions,
+    );
 
     // Type assertion for createIndexes result
     return formatResponse({
@@ -508,12 +663,13 @@ async function handleCreateIndex(
 async function handleCount(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
+  objectIdMode: ObjectIdConversionMode = "auto",
 ) {
   if (!collection) {
     throw new Error("Collection is required for count operation");
   }
   const { query, limit, skip, hint, readConcern, maxTimeMS, collation } = args;
-  const countQuery = parseFilter(query);
+  const countQuery = parseFilter(query, objectIdMode);
 
   try {
     // Build options object, removing undefined values
@@ -554,12 +710,25 @@ async function handleCount(
   }
 }
 
-async function handleListCollections(db: Db, args: Record<string, unknown>) {
+async function handleListCollections(
+  db: Db,
+  args: Record<string, unknown>,
+  objectIdMode: ObjectIdConversionMode = "auto",
+) {
   const { nameOnly, filter } = args;
+
+  // Process ObjectId strings in filter if present
+  let processedFilter = filter;
+  if (filter && typeof filter === "object") {
+    processedFilter = processObjectIdInFilter(
+      filter as Record<string, unknown>,
+      objectIdMode,
+    );
+  }
 
   try {
     // Get the list of collections
-    const options = filter ? { filter } : {};
+    const options = processedFilter ? { filter: processedFilter } : {};
     const collections = await db.listCollections(options).toArray();
 
     // If nameOnly is true, return only the collection names
