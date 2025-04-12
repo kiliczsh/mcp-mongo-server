@@ -33,6 +33,7 @@ export async function handleListToolsRequest({
             limit: {
               type: "number",
               description: "Maximum number of documents to return",
+              default: 10,
             },
             explain: {
               type: "string",
@@ -63,10 +64,14 @@ export async function handleListToolsRequest({
             pipeline: {
               type: "array",
               description: "Aggregation pipeline stages",
+              items: {
+                type: "object",
+              },
             },
             explain: {
               type: "string",
-              description: "Optional: Get aggregation execution information",
+              description:
+                "Optional: Get aggregation execution information (queryPlanner, executionStats, or allPlansExecution)",
               enum: ["queryPlanner", "executionStats", "allPlansExecution"],
             },
             objectIdMode: {
