@@ -17,11 +17,15 @@ export async function handlePingRequest({
     if (!client) {
       throw new Error("MongoDB connection is not available");
     }
+
     // Ping MongoDB to verify connection
-    await db.command({ ping: 1 });
-    return {
-      readOnlyMode: isReadOnlyMode,
-    };
+    const pong = await db.command({ ping: 1 });
+
+    if (pong.ok !== 1) {
+      throw new Error(`MongoDB ping failed: ${pong.errmsg}`);
+    }
+
+    return {};
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`MongoDB ping failed: ${error.message}`);
