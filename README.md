@@ -8,10 +8,6 @@
 
 A Model Context Protocol server that enables LLMs to interact with MongoDB databases. This server provides capabilities for inspecting collection schemas and executing MongoDB operations through a standardized interface.
 
-<a href="https://glama.ai/mcp/servers/@kiliczsh/mcp-mongo-server">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@kiliczsh/mcp-mongo-server/badge" />
-</a>
-
 ## Demo
 
 [![MCP MongoDB Server Demo | Claude Desktop](https://img.youtube.com/vi/FI-oE_voCpA/0.jpg)](https://www.youtube.com/watch?v=FI-oE_voCpA)
