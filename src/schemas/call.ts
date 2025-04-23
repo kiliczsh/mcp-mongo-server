@@ -309,15 +309,15 @@ async function handleQuery(
   if (!collection) {
     throw new Error("Collection is required for query operation");
   }
-  const { filter, projection, limit, explain } = args;
+  const { filter, projection, limit, explain, sort } = args;
   const queryFilter = parseFilter(filter, objectIdMode);
-
   try {
     if (explain) {
       const explainResult = await collection
         .find(queryFilter, {
           projection,
           limit: limit || 100,
+          sort,
         } as FindOptions<Document>)
         .explain(explain as string);
 
@@ -327,6 +327,7 @@ async function handleQuery(
     const cursor = collection.find(queryFilter, {
       projection,
       limit: limit || 100,
+      sort,
     } as FindOptions<Document>);
     const results = await cursor.toArray();
 
