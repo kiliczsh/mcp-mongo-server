@@ -84,6 +84,11 @@ export async function handleCallToolRequest({
     }
   }
 
+  // Checking whether sort option provided is valid
+  if (args.sort) {
+    args.sort = parseSort(args.sort);
+  }
+
   // Replace the original args with the filtered version
   Object.assign(args, filteredArgs);
 
@@ -168,6 +173,24 @@ function checkReadOnlyMode(operation: string, isReadOnlyMode: boolean): void {
       `ReadonlyError: Operation '${operation}' is not allowed in read-only mode`,
     );
   }
+}
+
+function parseSort(sort: unknown): Record<string, 1 | -1> | null {
+  if (!sort) return null;
+
+  if (typeof sort !== 'object' || sort === null || Array.isArray(sort)) {
+    return null;
+  }
+
+  const validSort: Record<string, 1 | -1> = {};
+
+  for (const [key, value] of Object.entries(sort)) {
+    if (typeof value === 'number' && (value === 1 || value === -1)) {
+      validSort[key] = value;
+    }
+  }
+
+  return Object.keys(validSort).length > 0 ? validSort : null;
 }
 
 function parseFilter(
@@ -309,15 +332,15 @@ async function handleQuery(
   if (!collection) {
     throw new Error("Collection is required for query operation");
   }
-  const { filter, projection, limit, explain } = args;
+  const { filter, projection, limit, explain, sort } = args;
   const queryFilter = parseFilter(filter, objectIdMode);
-
   try {
     if (explain) {
       const explainResult = await collection
         .find(queryFilter, {
           projection,
           limit: limit || 100,
+          sort,
         } as FindOptions<Document>)
         .explain(explain as string);
 
@@ -327,6 +350,7 @@ async function handleQuery(
     const cursor = collection.find(queryFilter, {
       projection,
       limit: limit || 100,
+      sort,
     } as FindOptions<Document>);
     const results = await cursor.toArray();
 
