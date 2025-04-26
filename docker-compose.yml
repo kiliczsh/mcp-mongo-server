@@ -1,0 +1,11 @@
+version: "3.9"
+services:
+  mcp-mongo-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - MCP_MONGODB_URI=mongodb://muhammed:kilic@localhost:27017/database
+      - MCP_MONGODB_READONLY=true
+    tty: true
+    stdin_open: true

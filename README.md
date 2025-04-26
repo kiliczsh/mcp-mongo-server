@@ -124,9 +124,14 @@ Using environment variables in Claude Desktop configuration:
 Using environment variables with Docker:
 
 ```bash
-docker run -e MCP_MONGODB_URI="mongodb://muhammed:kilic@localhost:27017/database" \
-           -e MCP_MONGODB_READONLY="true" \
-           mcp-mongo-server
+# Build
+docker build -t mcp-mongo-server .
+
+# Run
+docker run -it -d -e MCP_MONGODB_URI="mongodb://muhammed:kilic@localhost:27017/database" -e MCP_MONGODB_READONLY="true" mcp-mongo-server
+
+# or edit docker-compose.yml and run
+docker-compose up -d
 ```
 
 ## Integration with Claude Desktop
