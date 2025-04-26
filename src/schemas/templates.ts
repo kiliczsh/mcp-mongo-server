@@ -39,6 +39,12 @@ Example queries:
 3. Find documents with existing email:
 { "email": { "$exists": true } }
 
+4. Find documents with dates:
+// Using ISO date string format
+{ "createdAt": { "$gt": "2023-01-01T00:00:00Z" } }
+// Using ISODate syntax
+{ "createdAt": { "$gt": ISODate("2023-01-01T00:00:00Z") } }
+
 Use these patterns to construct MongoDB queries.`,
       },
     ],

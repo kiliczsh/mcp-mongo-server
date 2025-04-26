@@ -241,7 +241,45 @@ function processObjectIdInFilter(
 ): Filter<Document> {
   // If objectIdMode is "none", don't convert any strings to ObjectIds
   if (objectIdMode === "none") {
-    return filter as Filter<Document>;
+    // Create a new filter object to handle dates
+    const result: Record<string, unknown> = {};
+    
+    for (const [key, value] of Object.entries(filter)) {
+      if (typeof value === "string" && isISODateString(value)) {
+        // Convert ISO date string to Date object
+        result[key] = new Date(value);
+      } else if (typeof value === "string" && value.startsWith("ISODate(") && value.endsWith(")")) {
+        // Handle ISODate("2025-01-01T00:00:00Z") format
+        const dateString = value.substring(8, value.length - 2);
+        if (isISODateString(dateString)) {
+          result[key] = new Date(dateString);
+        } else {
+          result[key] = value;
+        }
+      } else if (typeof value === "object" && value !== null) {
+        if (Array.isArray(value)) {
+          // For arrays, apply date conversion to each item
+          result[key] = value.map((item) => {
+            if (typeof item === "string" && isISODateString(item)) {
+              return new Date(item);
+            } else if (typeof item === "string" && item.startsWith("ISODate(") && item.endsWith(")")) {
+              const dateString = item.substring(8, item.length - 2);
+              return isISODateString(dateString) ? new Date(dateString) : item;
+            }
+            return item;
+          });
+        } else {
+          // Process nested objects
+          result[key] = processObjectIdInFilter(
+            value as Record<string, unknown>, 
+            "none"
+          );
+        }
+      } else {
+        result[key] = value;
+      }
+    }
+    return result as Filter<Document>;
   }
 
   const result: Record<string, unknown> = {};
@@ -259,21 +297,32 @@ function processObjectIdInFilter(
       } else {
         result[key] = value;
       }
+    } else if (typeof value === "string" && isISODateString(value)) {
+      // Convert ISO date string to Date object
+      result[key] = new Date(value);
+    } else if (typeof value === "string" && value.startsWith("ISODate(") && value.endsWith(")")) {
+      // Handle ISODate("2025-01-01T00:00:00Z") format
+      const dateString = value.substring(8, value.length - 2);
+      if (isISODateString(dateString)) {
+        result[key] = new Date(dateString);
+      } else {
+        result[key] = value;
+      }
     } else if (typeof value === "object" && value !== null) {
       if (Array.isArray(value)) {
         // For arrays, apply the same logic to each item
-        if (
-          objectIdMode === "force" ||
-          (objectIdMode === "auto" && isObjectIdField(key))
-        ) {
-          result[key] = value.map((item) =>
-            typeof item === "string" && isObjectIdString(item)
-              ? new ObjectId(item)
-              : item,
-          );
-        } else {
-          result[key] = value;
-        }
+        result[key] = value.map((item) => {
+          if (typeof item === "string" && isObjectIdString(item) && 
+             (objectIdMode === "force" || (objectIdMode === "auto" && isObjectIdField(key)))) {
+            return new ObjectId(item);
+          } else if (typeof item === "string" && isISODateString(item)) {
+            return new Date(item);
+          } else if (typeof item === "string" && item.startsWith("ISODate(") && item.endsWith(")")) {
+            const dateString = item.substring(8, item.length - 2);
+            return isISODateString(dateString) ? new Date(dateString) : item;
+          }
+          return item;
+        });
       } else {
         // Process nested objects
         result[key] = processObjectIdInFilter(
@@ -293,6 +342,12 @@ function processObjectIdInFilter(
 function isObjectIdString(str: string): boolean {
   // MongoDB ObjectId is typically a 24-character hex string
   return /^[0-9a-fA-F]{24}$/.test(str);
+}
+
+// Helper function to check if a string is in ISO date format
+function isISODateString(str: string): boolean {
+  // Check if string matches ISO 8601 format
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(str);
 }
 
 function formatResponse(data: unknown): {
