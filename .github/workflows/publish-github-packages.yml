@@ -29,7 +29,7 @@ jobs:
       packages: write
 
     env:
-      STATIC_VERSION: "1.2.0"
+      STATIC_VERSION: "1.3.0"
       BUILD_ID: ${{ github.run_number }}
 
     steps:
