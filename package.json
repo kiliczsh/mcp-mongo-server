@@ -19,6 +19,7 @@
     "dependencies": {
         "@modelcontextprotocol/sdk": "0.6.0",
         "@types/mongodb": "^4.0.6",
+        "mcp-evals": "^1.0.18",
         "mongodb": "^6.11.0",
         "zod": "^3.23.8"
     },
