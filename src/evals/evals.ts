@@ -78,9 +78,9 @@ const listCollections: EvalFunction = {
 
 const config: EvalConfig = {
     model: openai("gpt-4"),
-    evals: [query]
+    evals: [query, aggregate, update, serverInfo, insert, createIndex, count, listCollections]
 };
   
 export default config;
   
-export const evals = [query];
+export const evals = [query, aggregate, update, serverInfo, insert, createIndex, count, listCollections];
