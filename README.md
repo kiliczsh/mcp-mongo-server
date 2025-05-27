@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/kiliczsh-mcp-mongo-server-badge.png)](https://mseep.ai/app/kiliczsh-mcp-mongo-server)
+
 # MCP MongoDB Server
 ---
 
