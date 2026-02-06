@@ -25,9 +25,10 @@ export async function handleListToolsRequest({
               type: "string",
               description: "Name of the collection to query",
             },
-            filter: { 
-              type: "object", 
-              description: "MongoDB query filter. Supports date strings in ISO format ('2025-01-01T00:00:00Z') and ISODate('2025-01-01T00:00:00Z') notation" 
+            filter: {
+              type: "object",
+              description:
+                "MongoDB query filter. Supports date strings in ISO format ('2025-01-01T00:00:00Z') and ISODate('2025-01-01T00:00:00Z') notation",
             },
             projection: {
               type: "object",
@@ -66,7 +67,8 @@ export async function handleListToolsRequest({
             },
             pipeline: {
               type: "array",
-              description: "Aggregation pipeline stages. Supports date strings in ISO format ('2025-01-01T00:00:00Z') and ISODate('2025-01-01T00:00:00Z') notation",
+              description:
+                "Aggregation pipeline stages. Supports date strings in ISO format ('2025-01-01T00:00:00Z') and ISODate('2025-01-01T00:00:00Z') notation",
               items: {
                 type: "object",
               },
@@ -99,7 +101,8 @@ export async function handleListToolsRequest({
             },
             filter: {
               type: "object",
-              description: "Filter to select documents to update. Supports date strings in ISO format ('2025-01-01T00:00:00Z') and ISODate('2025-01-01T00:00:00Z') notation",
+              description:
+                "Filter to select documents to update. Supports date strings in ISO format ('2025-01-01T00:00:00Z') and ISODate('2025-01-01T00:00:00Z') notation",
             },
             update: {
               type: "object",

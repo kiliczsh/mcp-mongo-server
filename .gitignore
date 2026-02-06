@@ -3,3 +3,4 @@ build/
 *.log
 .env*
 .DS_Store
+inspector-config.json

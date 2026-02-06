@@ -1,27 +1,29 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-  ReadResourceRequestSchema,
-  ListPromptsRequestSchema,
-  GetPromptRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  PingRequestSchema,
   CompleteRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ListToolsRequestSchema,
+  PingRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import {
-  handleReadResourceRequest,
-  handleListResourcesRequest,
-} from "./schemas/resource.js";
-import { handlePingRequest } from "./schemas/ping.js";
-import { handleListToolsRequest } from "./schemas/tools.js";
-import { handleListPromptsRequest } from "./schemas/prompts.js";
-import { handleCallToolRequest } from "./schemas/call.js";
-import { handleListResourceTemplatesRequest } from "./schemas/templates.js";
-import { handleGetPromptRequest } from "./schemas/prompts.js";
 import type { Db, MongoClient } from "mongodb";
+import { handleCallToolRequest } from "./schemas/call.js";
 import { handleCompletionRequest } from "./schemas/completion.js";
+import { handlePingRequest } from "./schemas/ping.js";
+import {
+  handleGetPromptRequest,
+  handleListPromptsRequest,
+} from "./schemas/prompts.js";
+import {
+  handleListResourcesRequest,
+  handleReadResourceRequest,
+} from "./schemas/resource.js";
+import { handleListResourceTemplatesRequest } from "./schemas/templates.js";
+import { handleListToolsRequest } from "./schemas/tools.js";
 
 /**
  * Create an MCP server with capabilities for resources (to list/read collections),
@@ -41,6 +43,7 @@ export function createServer(
     },
     {
       capabilities: {
+        completions: {},
         resources: {},
         tools: {},
         prompts: {},

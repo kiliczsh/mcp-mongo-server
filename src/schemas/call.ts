@@ -1,17 +1,17 @@
 import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
 import type {
-  Db,
-  MongoClient,
-  Filter,
-  Document,
-  FindOptions,
   BulkWriteOptions,
-  WriteConcern,
-  CreateIndexesOptions,
   CollationOptions,
-  CountDocumentsOptions,
-  ReadConcernLike,
   Collection,
+  CountDocumentsOptions,
+  CreateIndexesOptions,
+  Db,
+  Document,
+  Filter,
+  FindOptions,
+  MongoClient,
+  ReadConcernLike,
+  WriteConcern,
 } from "mongodb";
 import { ObjectId } from "mongodb";
 
@@ -178,14 +178,14 @@ function checkReadOnlyMode(operation: string, isReadOnlyMode: boolean): void {
 function parseSort(sort: unknown): Record<string, 1 | -1> | null {
   if (!sort) return null;
 
-  if (typeof sort !== 'object' || sort === null || Array.isArray(sort)) {
+  if (typeof sort !== "object" || sort === null || Array.isArray(sort)) {
     return null;
   }
 
   const validSort: Record<string, 1 | -1> = {};
 
   for (const [key, value] of Object.entries(sort)) {
-    if (typeof value === 'number' && (value === 1 || value === -1)) {
+    if (typeof value === "number" && (value === 1 || value === -1)) {
       validSort[key] = value;
     }
   }
@@ -204,7 +204,7 @@ function parseFilter(
   if (typeof filter === "string") {
     try {
       return processObjectIdInFilter(JSON.parse(filter), objectIdMode);
-    } catch (e) {
+    } catch {
       throw new Error("Invalid filter format: must be a valid JSON object");
     }
   }
@@ -243,12 +243,16 @@ function processObjectIdInFilter(
   if (objectIdMode === "none") {
     // Create a new filter object to handle dates
     const result: Record<string, unknown> = {};
-    
+
     for (const [key, value] of Object.entries(filter)) {
       if (typeof value === "string" && isISODateString(value)) {
         // Convert ISO date string to Date object
         result[key] = new Date(value);
-      } else if (typeof value === "string" && value.startsWith("ISODate(") && value.endsWith(")")) {
+      } else if (
+        typeof value === "string" &&
+        value.startsWith("ISODate(") &&
+        value.endsWith(")")
+      ) {
         // Handle ISODate("2025-01-01T00:00:00Z") format
         const dateString = value.substring(8, value.length - 2);
         if (isISODateString(dateString)) {
@@ -262,7 +266,11 @@ function processObjectIdInFilter(
           result[key] = value.map((item) => {
             if (typeof item === "string" && isISODateString(item)) {
               return new Date(item);
-            } else if (typeof item === "string" && item.startsWith("ISODate(") && item.endsWith(")")) {
+            } else if (
+              typeof item === "string" &&
+              item.startsWith("ISODate(") &&
+              item.endsWith(")")
+            ) {
               const dateString = item.substring(8, item.length - 2);
               return isISODateString(dateString) ? new Date(dateString) : item;
             }
@@ -271,8 +279,8 @@ function processObjectIdInFilter(
         } else {
           // Process nested objects
           result[key] = processObjectIdInFilter(
-            value as Record<string, unknown>, 
-            "none"
+            value as Record<string, unknown>,
+            "none",
           );
         }
       } else {
@@ -300,7 +308,11 @@ function processObjectIdInFilter(
     } else if (typeof value === "string" && isISODateString(value)) {
       // Convert ISO date string to Date object
       result[key] = new Date(value);
-    } else if (typeof value === "string" && value.startsWith("ISODate(") && value.endsWith(")")) {
+    } else if (
+      typeof value === "string" &&
+      value.startsWith("ISODate(") &&
+      value.endsWith(")")
+    ) {
       // Handle ISODate("2025-01-01T00:00:00Z") format
       const dateString = value.substring(8, value.length - 2);
       if (isISODateString(dateString)) {
@@ -312,12 +324,20 @@ function processObjectIdInFilter(
       if (Array.isArray(value)) {
         // For arrays, apply the same logic to each item
         result[key] = value.map((item) => {
-          if (typeof item === "string" && isObjectIdString(item) && 
-             (objectIdMode === "force" || (objectIdMode === "auto" && isObjectIdField(key)))) {
+          if (
+            typeof item === "string" &&
+            isObjectIdString(item) &&
+            (objectIdMode === "force" ||
+              (objectIdMode === "auto" && isObjectIdField(key)))
+          ) {
             return new ObjectId(item);
           } else if (typeof item === "string" && isISODateString(item)) {
             return new Date(item);
-          } else if (typeof item === "string" && item.startsWith("ISODate(") && item.endsWith(")")) {
+          } else if (
+            typeof item === "string" &&
+            item.startsWith("ISODate(") &&
+            item.endsWith(")")
+          ) {
             const dateString = item.substring(8, item.length - 2);
             return isISODateString(dateString) ? new Date(dateString) : item;
           }
@@ -396,7 +416,7 @@ async function handleQuery(
           projection,
           limit: limit || 100,
           sort,
-        } as FindOptions<Document>)
+        } as FindOptions)
         .explain(explain as string);
 
       return formatResponse(explainResult);
@@ -406,7 +426,7 @@ async function handleQuery(
       projection,
       limit: limit || 100,
       sort,
-    } as FindOptions<Document>);
+    } as FindOptions);
     const results = await cursor.toArray();
 
     return formatResponse(results);

@@ -1,4 +1,4 @@
-import { MongoClient, ReadPreference, type Db } from "mongodb";
+import { type Db, MongoClient, ReadPreference } from "mongodb";
 
 /**
  * Initialize MongoDB connection

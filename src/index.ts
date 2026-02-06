@@ -1,8 +1,7 @@
-#!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { MongoClient } from "mongodb";
 import { connectToMongoDB } from "./mongo.js";
 import { createServer } from "./server.js";
-import { MongoClient } from "mongodb";
 
 // Declare a client variable in the global scope for cleanup handlers
 let mongoClient: MongoClient | null = null; // TODO: Fix Typescript error
