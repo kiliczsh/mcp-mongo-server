@@ -39,6 +39,12 @@ export async function handleListToolsRequest({
               description: "Maximum number of documents to return",
               default: 10,
             },
+            skip: {
+              type: "number",
+              description:
+                "Number of documents to skip before returning results",
+              default: 0,
+            },
             explain: {
               type: "string",
               description: "Optional: Get query execution information",
@@ -290,6 +296,17 @@ export async function handleListToolsRequest({
             filter: {
               type: "object",
               description: "Filter for collections",
+            },
+            skip: {
+              type: "number",
+              description:
+                "Number of collections to skip before returning results",
+              default: 0,
+            },
+            limit: {
+              type: "number",
+              description: "Maximum number of collections to return",
+              default: 20,
             },
             objectIdMode: {
               type: "string",

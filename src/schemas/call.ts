@@ -407,14 +407,17 @@ async function handleQuery(
   if (!collection) {
     throw new Error("Collection is required for query operation");
   }
-  const { filter, projection, limit, explain, sort } = args;
+  const { filter, projection, explain, sort } = args;
+  const limit = (args.limit as number) || 10;
+  const skip = (args.skip as number) || 0;
   const queryFilter = parseFilter(filter, objectIdMode);
   try {
     if (explain) {
       const explainResult = await collection
         .find(queryFilter, {
           projection,
-          limit: limit || 100,
+          limit,
+          skip,
           sort,
         } as FindOptions)
         .explain(explain as string);
@@ -422,14 +425,28 @@ async function handleQuery(
       return formatResponse(explainResult);
     }
 
-    const cursor = collection.find(queryFilter, {
-      projection,
-      limit: limit || 100,
-      sort,
-    } as FindOptions);
-    const results = await cursor.toArray();
+    const [total, results] = await Promise.all([
+      collection.countDocuments(queryFilter),
+      collection
+        .find(queryFilter, {
+          projection,
+          limit,
+          skip,
+          sort,
+        } as FindOptions)
+        .toArray(),
+    ]);
 
-    return formatResponse(results);
+    return formatResponse({
+      results,
+      metadata: {
+        total,
+        returned: results.length,
+        skip,
+        limit,
+        hasMore: skip + results.length < total,
+      },
+    });
   } catch (error) {
     return handleError(error, "query", collection.collectionName);
   }
@@ -474,7 +491,12 @@ async function handleAggregate(
     }
 
     const results = await collection.aggregate(processedPipeline).toArray();
-    return formatResponse(results);
+    return formatResponse({
+      results,
+      metadata: {
+        returned: results.length,
+      },
+    });
   } catch (error) {
     return handleError(error, "aggregate", collection.collectionName);
   }
@@ -815,6 +837,8 @@ async function handleListCollections(
   objectIdMode: ObjectIdConversionMode = "auto",
 ) {
   const { nameOnly, filter } = args;
+  const skip = (args.skip as number) || 0;
+  const limit = (args.limit as number) || 20;
 
   // Process ObjectId strings in filter if present
   let processedFilter = filter;
@@ -831,11 +855,23 @@ async function handleListCollections(
     const collections = await db.listCollections(options).toArray();
 
     // If nameOnly is true, return only the collection names
-    const result = nameOnly
+    const allResults = nameOnly
       ? collections.map((collection) => collection.name)
       : collections;
 
-    return formatResponse(result);
+    const total = allResults.length;
+    const paged = allResults.slice(skip, skip + limit);
+
+    return formatResponse({
+      results: paged,
+      metadata: {
+        total,
+        returned: paged.length,
+        skip,
+        limit,
+        hasMore: skip + paged.length < total,
+      },
+    });
   } catch (error) {
     return handleError(error, "list collections");
   }

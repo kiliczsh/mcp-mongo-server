@@ -10,6 +10,7 @@ import type {
   MongoClient,
 } from "mongodb";
 import { ObjectId } from "mongodb";
+import { paginate } from "../utils/pagination.js";
 
 // Define interfaces for schema inference
 interface FieldInfo {
@@ -302,13 +303,19 @@ export async function handleListResourcesRequest({
   try {
     const collections = await db.listCollections().toArray();
 
+    const allResources = collections.map((collection: CollectionInfo) => ({
+      uri: `mongodb:///${collection.name}`,
+      mimeType: "application/json",
+      name: collection.name,
+      description: `MongoDB collection: ${collection.name}`,
+    }));
+
+    const cursor = request.params?.cursor;
+    const { items, nextCursor } = paginate(allResources, cursor);
+
     return {
-      resources: collections.map((collection: CollectionInfo) => ({
-        uri: `mongodb:///${collection.name}`,
-        mimeType: "application/json",
-        name: collection.name,
-        description: `MongoDB collection: ${collection.name}`,
-      })),
+      resources: items,
+      ...(nextCursor ? { nextCursor } : {}),
     };
   } catch (error) {
     if (error instanceof Error) {

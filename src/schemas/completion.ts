@@ -3,6 +3,7 @@ import type {
   CompleteResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { CollectionInfo, Db, MongoClient } from "mongodb";
+import { paginate } from "../utils/pagination.js";
 
 /**
  * Handles completion requests from the Model Context Protocol
@@ -148,16 +149,19 @@ async function completeCollectionNames(
 
     console.warn(`Found ${matchingCollections.length} matching collections`);
 
-    // Limit to 100 items as per spec
-    const MAX_ITEMS = 100;
-    const limitedResults = matchingCollections.slice(0, MAX_ITEMS);
-    const hasMore = matchingCollections.length > MAX_ITEMS;
+    // Paginate results using cursor-based pagination (page size 100 per spec)
+    const PAGE_SIZE = 100;
+    const { items: limitedResults, nextCursor } = paginate(
+      matchingCollections,
+      undefined,
+      PAGE_SIZE,
+    );
 
     return {
       completion: {
         values: limitedResults,
         total: matchingCollections.length,
-        hasMore,
+        hasMore: !!nextCursor,
       },
     };
   } catch (error) {
