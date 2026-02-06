@@ -199,9 +199,7 @@ async function startHttpServer(
   });
 
   app.listen(port, () => {
-    console.log(
-      `MCP MongoDB Streamable HTTP Server listening on port ${port}`,
-    );
+    console.log(`MCP MongoDB Streamable HTTP Server listening on port ${port}`);
     console.log(`Endpoint: http://localhost:${port}/mcp`);
   });
 }
