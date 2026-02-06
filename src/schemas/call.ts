@@ -148,12 +148,16 @@ export async function handleCallToolRequest({
         );
         await taskStore.storeTaskResult(task.taskId, "completed", result);
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Unknown error";
-        await taskStore.storeTaskResult(task.taskId, "failed", {
-          content: [{ type: "text", text: message }],
-          isError: true,
-        });
+        try {
+          const message =
+            error instanceof Error ? error.message : "Unknown error";
+          await taskStore.storeTaskResult(task.taskId, "failed", {
+            content: [{ type: "text", text: message }],
+            isError: true,
+          });
+        } catch {
+          // Task may already be in a terminal state (cancelled, completed, or failed)
+        }
       }
     })();
 

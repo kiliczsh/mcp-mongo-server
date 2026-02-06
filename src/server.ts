@@ -144,17 +144,19 @@ export function createServer(
   /**
    * Handler for MongoDB tools.
    */
-  server.setRequestHandler(CallToolRequestSchema, (request, extra) =>
-    handleCallToolRequest({
+  server.setRequestHandler(CallToolRequestSchema, (request, extra) => {
+    // Only enter task path when the client explicitly requests it
+    const hasTaskParams = !!(request.params as Record<string, unknown>).task;
+    return handleCallToolRequest({
       request,
       client,
       db,
       isReadOnlyMode,
       signal: extra.signal,
-      taskStore: extra.taskStore,
-      taskTtl: extra.taskRequestedTtl,
-    }),
-  );
+      taskStore: hasTaskParams ? extra.taskStore : undefined,
+      taskTtl: hasTaskParams ? extra.taskRequestedTtl : undefined,
+    });
+  });
 
   /**
    * Handler that lists available prompts.
