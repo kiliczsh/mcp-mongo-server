@@ -64,11 +64,13 @@ export async function handleCallToolRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
 }: {
   request: CallToolRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
 }) {
   const { name, arguments: args = {} } = request.params;
   const operation = name as MongoOperation;
@@ -116,24 +118,26 @@ export async function handleCallToolRequest({
     validateCollection(collection);
   }
 
+  signal?.throwIfAborted();
+
   // Route to the appropriate handler based on operation name
   switch (operation) {
     case "query":
-      return handleQuery(collection, args, objectIdMode);
+      return handleQuery(collection, args, objectIdMode, signal);
     case "aggregate":
-      return handleAggregate(collection, args, objectIdMode);
+      return handleAggregate(collection, args, objectIdMode, signal);
     case "update":
-      return handleUpdate(collection, args, objectIdMode);
+      return handleUpdate(collection, args, objectIdMode, signal);
     case "serverInfo":
-      return handleServerInfo(db, isReadOnlyMode, args);
+      return handleServerInfo(db, isReadOnlyMode, args, signal);
     case "insert":
-      return handleInsert(collection, args, objectIdMode);
+      return handleInsert(collection, args, objectIdMode, signal);
     case "createIndex":
-      return handleCreateIndex(collection, args, objectIdMode);
+      return handleCreateIndex(collection, args, objectIdMode, signal);
     case "count":
-      return handleCount(collection, args, objectIdMode);
+      return handleCount(collection, args, objectIdMode, signal);
     case "listCollections":
-      return handleListCollections(db, args, objectIdMode);
+      return handleListCollections(db, args, objectIdMode, signal);
     default:
       throw new Error(`Unknown operation: ${operation}`);
   }
@@ -403,6 +407,7 @@ async function handleQuery(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for query operation");
@@ -413,6 +418,7 @@ async function handleQuery(
   const queryFilter = parseFilter(filter, objectIdMode);
   try {
     if (explain) {
+      signal?.throwIfAborted();
       const explainResult = await collection
         .find(queryFilter, {
           projection,
@@ -425,6 +431,7 @@ async function handleQuery(
       return formatResponse(explainResult);
     }
 
+    signal?.throwIfAborted();
     const [total, results] = await Promise.all([
       collection.countDocuments(queryFilter),
       collection
@@ -456,6 +463,7 @@ async function handleAggregate(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for aggregate operation");
@@ -479,6 +487,7 @@ async function handleAggregate(
 
   try {
     if (explain) {
+      signal?.throwIfAborted();
       const explainResult = await collection
         .aggregate(processedPipeline, {
           explain: {
@@ -490,6 +499,7 @@ async function handleAggregate(
       return formatResponse(explainResult);
     }
 
+    signal?.throwIfAborted();
     const results = await collection.aggregate(processedPipeline).toArray();
     return formatResponse({
       results,
@@ -506,6 +516,7 @@ async function handleUpdate(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for update operation");
@@ -562,6 +573,7 @@ async function handleUpdate(
 
     // Use updateOne or updateMany based on multi option
     const updateMethod = options.multi ? "updateMany" : "updateOne";
+    signal?.throwIfAborted();
     const result = await collection[updateMethod](
       queryFilter,
       processedUpdate,
@@ -583,16 +595,19 @@ async function handleServerInfo(
   db: Db,
   isReadOnlyMode: boolean,
   args: Record<string, unknown>,
+  signal?: AbortSignal,
 ) {
   const { includeDebugInfo } = args;
 
   try {
     // Get basic server information using buildInfo command
+    signal?.throwIfAborted();
     const buildInfo = await db.command({ buildInfo: 1 });
 
     // Get additional server status if debug info is requested
     let serverStatus = null;
     if (includeDebugInfo) {
+      signal?.throwIfAborted();
       serverStatus = await db.command({ serverStatus: 1 });
     }
 
@@ -647,6 +662,7 @@ async function handleInsert(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for insert operation");
@@ -684,6 +700,7 @@ async function handleInsert(
     };
 
     // Use insertMany for consistency, it works for single documents too
+    signal?.throwIfAborted();
     const result = await collection.insertMany(
       processedDocuments as Document[],
       options,
@@ -715,6 +732,7 @@ async function handleCreateIndex(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for createIndex operation");
@@ -762,6 +780,7 @@ async function handleCreateIndex(
       commitQuorum: typeof commitQuorum === "number" ? commitQuorum : undefined,
     };
 
+    signal?.throwIfAborted();
     const result = await collection.createIndexes(
       processedIndexes,
       indexOptions,
@@ -785,6 +804,7 @@ async function handleCount(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for count operation");
@@ -820,6 +840,7 @@ async function handleCount(
     }
 
     // Execute count operation
+    signal?.throwIfAborted();
     const count = await collection.countDocuments(countQuery, options);
 
     return formatResponse({
@@ -835,6 +856,7 @@ async function handleListCollections(
   db: Db,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   const { nameOnly, filter } = args;
   const skip = (args.skip as number) || 0;
@@ -852,6 +874,7 @@ async function handleListCollections(
   try {
     // Get the list of collections
     const options = processedFilter ? { filter: processedFilter } : {};
+    signal?.throwIfAborted();
     const collections = await db.listCollections(options).toArray();
 
     // If nameOnly is true, return only the collection names

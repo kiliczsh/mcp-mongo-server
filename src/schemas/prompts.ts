@@ -9,11 +9,13 @@ export async function handleListPromptsRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
 }: {
   request: ListPromptsRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
 }) {
   return {
     prompts: [
@@ -37,11 +39,13 @@ export async function handleGetPromptRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
 }: {
   request: GetPromptRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
 }) {
   const { name, arguments: args = {} } = request.params;
 
@@ -61,10 +65,13 @@ export async function handleGetPromptRequest({
       throw new Error("Access to system collections is not allowed");
     }
 
+    signal?.throwIfAborted();
     const schemaSample = await collection.findOne({});
+    signal?.throwIfAborted();
     const stats = await collection
       .aggregate([{ $collStats: { count: {} } }])
       .toArray();
+    signal?.throwIfAborted();
     const sampleDocs = await collection.find({}).limit(5).toArray();
 
     const documentCount = stats[0]?.count ?? "unknown";

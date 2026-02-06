@@ -55,64 +55,120 @@ export function createServer(
   /**
    * Handler for ping requests to check server health
    */
-  server.setRequestHandler(PingRequestSchema, (request) =>
-    handlePingRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(PingRequestSchema, (request, extra) =>
+    handlePingRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   /**
    * Handler for listing available collections as resources.
    */
-  server.setRequestHandler(ListResourcesRequestSchema, (request) =>
-    handleListResourcesRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(ListResourcesRequestSchema, (request, extra) =>
+    handleListResourcesRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   /**
    * Handler for reading a collection's schema or contents.
    */
-  server.setRequestHandler(ReadResourceRequestSchema, (request) =>
-    handleReadResourceRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(ReadResourceRequestSchema, (request, extra) =>
+    handleReadResourceRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   /**
    * Handler that lists available tools.
    */
-  server.setRequestHandler(ListToolsRequestSchema, (request) =>
-    handleListToolsRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(ListToolsRequestSchema, (request, extra) =>
+    handleListToolsRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   /**
    * Handler for MongoDB tools.
    */
-  server.setRequestHandler(CallToolRequestSchema, (request) =>
-    handleCallToolRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(CallToolRequestSchema, (request, extra) =>
+    handleCallToolRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   /**
    * Handler that lists available prompts.
    */
-  server.setRequestHandler(ListPromptsRequestSchema, (request) =>
-    handleListPromptsRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(ListPromptsRequestSchema, (request, extra) =>
+    handleListPromptsRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   /**
    * Handler for collection analysis prompt.
    */
-  server.setRequestHandler(GetPromptRequestSchema, (request) =>
-    handleGetPromptRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(GetPromptRequestSchema, (request, extra) =>
+    handleGetPromptRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   /**
    * Handler for listing templates.
    */
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, (request) =>
-    handleListResourceTemplatesRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(
+    ListResourceTemplatesRequestSchema,
+    (request, extra) =>
+      handleListResourceTemplatesRequest({
+        request,
+        client,
+        db,
+        isReadOnlyMode,
+        signal: extra.signal,
+      }),
   );
 
   /**
    * Handler for completion requests.
    */
-  server.setRequestHandler(CompleteRequestSchema, (request) =>
-    handleCompletionRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(CompleteRequestSchema, (request, extra) =>
+    handleCompletionRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   return server;

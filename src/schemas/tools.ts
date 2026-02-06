@@ -6,11 +6,13 @@ export async function handleListToolsRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
 }: {
   request: ListToolsRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
 }) {
   return {
     tools: [

@@ -15,11 +15,13 @@ export async function handleCompletionRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
 }: {
   request: CompleteRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
 }): Promise<CompleteResult> {
   const { ref, argument } = request.params;
 
@@ -31,6 +33,7 @@ export async function handleCompletionRequest({
       isReadOnlyMode,
       ref.name,
       argument,
+      signal,
     );
   }
 
@@ -42,6 +45,7 @@ export async function handleCompletionRequest({
       isReadOnlyMode,
       ref.uri,
       argument,
+      signal,
     );
   }
 
@@ -64,6 +68,7 @@ async function handlePromptCompletion(
   isReadOnlyMode: boolean,
   promptName: string | undefined,
   argument: { name: string; value: string },
+  signal?: AbortSignal,
 ): Promise<CompleteResult> {
   if (!promptName) {
     return emptyCompletionResult();
@@ -71,7 +76,12 @@ async function handlePromptCompletion(
 
   // Handle collection name completions
   if (argument.name === "collection") {
-    return await completeCollectionNames(argument.value, db, isReadOnlyMode);
+    return await completeCollectionNames(
+      argument.value,
+      db,
+      isReadOnlyMode,
+      signal,
+    );
   }
 
   // Add other prompt completions here as needed
@@ -94,6 +104,7 @@ async function handleResourceCompletion(
   isReadOnlyMode: boolean,
   promptName: string | undefined,
   argument: { name: string; value: string },
+  signal?: AbortSignal,
 ): Promise<CompleteResult> {
   if (!promptName) {
     return emptyCompletionResult();
@@ -101,7 +112,12 @@ async function handleResourceCompletion(
 
   // Handle collection name completions
   if (argument.name === "collection") {
-    return await completeCollectionNames(argument.value, db, isReadOnlyMode);
+    return await completeCollectionNames(
+      argument.value,
+      db,
+      isReadOnlyMode,
+      signal,
+    );
   }
 
   // Add other prompt completions here as needed
@@ -120,6 +136,7 @@ async function completeCollectionNames(
   partialValue: string,
   db: Db,
   isReadOnlyMode: boolean,
+  signal?: AbortSignal,
 ): Promise<CompleteResult> {
   try {
     console.warn(
@@ -127,6 +144,7 @@ async function completeCollectionNames(
     );
 
     // Get list of collections
+    signal?.throwIfAborted();
     const collections: (
       | CollectionInfo
       | Pick<CollectionInfo, "type" | "name">
