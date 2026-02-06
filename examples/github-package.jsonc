@@ -1,0 +1,13 @@
+// Use GitHub package directly instead of npm
+{
+  "mcpServers": {
+    "mongodb": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "github:kiliczsh/mcp-mongo-server",
+        "mongodb://username:password@localhost:27017/database"
+      ]
+    }
+  }
+}

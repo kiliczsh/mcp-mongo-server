@@ -6,6 +6,7 @@ export default defineConfig({
   target: "es2022",
   outDir: "build",
   clean: true,
+  external: ["@modelcontextprotocol/sdk", "mongodb"],
   banner: {
     js: "#!/usr/bin/env node",
   },

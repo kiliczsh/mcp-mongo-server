@@ -1,9 +1,11 @@
+// ~/.cursor/mcp.json
 {
   "mcpServers": {
     "mongodb": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "build/index.js",
+        "-y",
+        "mcp-mongo-server",
         "mongodb://username:password@localhost:27017/database"
       ]
     }

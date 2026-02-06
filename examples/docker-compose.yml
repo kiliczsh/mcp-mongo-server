@@ -1,0 +1,25 @@
+# docker-compose.yml
+services:
+  mcp-mongo-server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: mcp-mongo-server
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - MCP_MONGODB_URI=mongodb://username:password@localhost:27017/database
+      - MCP_MONGODB_READONLY=true
+      - MCP_PORT=3001
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/mcp').catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

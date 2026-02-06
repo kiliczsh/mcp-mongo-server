@@ -1,4 +1,6 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import type { MongoClient } from "mongodb";
 import { connectToMongoDB } from "./mongo.js";
 import { createServer } from "./server.js";
@@ -14,11 +16,26 @@ async function main() {
   // Default to environment variables
   let connectionUrl = "";
   let readOnlyMode = process.env.MCP_MONGODB_READONLY === "true" || false;
+  let transportMode: "stdio" | "http" = "stdio";
+  let port = Number(process.env.MCP_PORT) || 3001;
 
   // Parse command line arguments (these take precedence)
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--read-only" || args[i] === "-r") {
       readOnlyMode = true;
+    } else if (args[i] === "--transport" || args[i] === "-t") {
+      const value = args[++i];
+      if (value !== "stdio" && value !== "http") {
+        console.error("Invalid transport mode. Use 'stdio' or 'http'.");
+        process.exit(1);
+      }
+      transportMode = value;
+    } else if (args[i] === "--port" || args[i] === "-p") {
+      port = Number(args[++i]);
+      if (Number.isNaN(port)) {
+        console.error("Invalid port number.");
+        process.exit(1);
+      }
     } else if (!connectionUrl) {
       connectionUrl = args[i];
     }
@@ -33,7 +50,9 @@ async function main() {
     console.error(
       "Please provide a MongoDB connection URL via command-line argument or MCP_MONGODB_URI environment variable",
     );
-    console.error("Usage: command <mongodb-url> [--read-only|-r]");
+    console.error(
+      "Usage: command <mongodb-url> [--read-only|-r] [--transport stdio|http] [--port 3001]",
+    );
     console.error(
       "   or: MCP_MONGODB_URI=<mongodb-url> [MCP_MONGODB_READONLY=true] command",
     );
@@ -65,13 +84,11 @@ async function main() {
       process.exit(1);
     }
 
-    // Pass db instead of client to createServer
-    const server = createServer(client, db, isReadOnlyMode);
-
-    const transport = new StdioServerTransport();
-
-    await server.connect(transport);
-    console.warn("Server connected successfully");
+    if (transportMode === "http") {
+      await startHttpServer(client, db, isReadOnlyMode, port);
+    } else {
+      await startStdioServer(client, db, isReadOnlyMode);
+    }
   } catch (error) {
     console.error("Failed to connect to MongoDB:", error);
     if (mongoClient) {
@@ -79,6 +96,114 @@ async function main() {
     }
     process.exit(1);
   }
+}
+
+/**
+ * Start the server with stdio transport (default behavior).
+ */
+async function startStdioServer(
+  client: MongoClient,
+  db: import("mongodb").Db,
+  isReadOnlyMode: boolean,
+) {
+  const server = createServer(client, db, isReadOnlyMode);
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.warn("Server connected successfully via stdio");
+}
+
+/**
+ * Start the server with Streamable HTTP transport.
+ */
+async function startHttpServer(
+  client: MongoClient,
+  db: import("mongodb").Db,
+  isReadOnlyMode: boolean,
+  port: number,
+) {
+  const app = createMcpExpressApp({ host: "0.0.0.0" });
+
+  // Request logging middleware
+  app.use((req, res, next) => {
+    const start = Date.now();
+    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+    const method = req.method;
+    const url = req.url;
+
+    let mcpMethod = "-";
+    if (req.body && typeof req.body === "object" && "method" in req.body) {
+      mcpMethod = req.body.method;
+    }
+
+    res.on("finish", () => {
+      const duration = Date.now() - start;
+      console.log(
+        `${new Date().toISOString()} | ${ip} | ${method} ${url} | ${res.statusCode} | ${duration}ms | mcp:${mcpMethod}`,
+      );
+    });
+
+    next();
+  });
+
+  app.post("/mcp", async (req, res) => {
+    const server = createServer(client, db, isReadOnlyMode);
+    try {
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      });
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+      res.on("close", () => {
+        transport.close();
+        server.close();
+      });
+    } catch (error) {
+      console.error("Error handling MCP request:", error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: {
+            code: -32603,
+            message: "Internal server error",
+          },
+          id: null,
+        });
+      }
+    }
+  });
+
+  app.get("/mcp", async (_req, res) => {
+    res.writeHead(405).end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "Method not allowed.",
+        },
+        id: null,
+      }),
+    );
+  });
+
+  app.delete("/mcp", async (_req, res) => {
+    res.writeHead(405).end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "Method not allowed.",
+        },
+        id: null,
+      }),
+    );
+  });
+
+  app.listen(port, () => {
+    console.log(
+      `MCP MongoDB Streamable HTTP Server listening on port ${port}`,
+    );
+    console.log(`Endpoint: http://localhost:${port}/mcp`);
+  });
 }
 
 // Handle cleanup

@@ -1,11 +1,31 @@
-version: "3.9"
 services:
   mcp-mongo-server:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: mcp-mongo-server
     environment:
       - MCP_MONGODB_URI=mongodb://muhammed:kilic@localhost:27017/database
       - MCP_MONGODB_READONLY=true
-    tty: true
-    stdin_open: true
+      - MCP_PORT=3001
+    healthcheck:
+      interval: 30s
+      retries: 3
+      start_period: 10s
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3001/mcp').catch(() => process.exit(1))",
+        ]
+      timeout: 5s
+
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: "10m"
+    ports:
+      - "3001:3001"
+    restart: unless-stopped

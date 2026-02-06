@@ -1,0 +1,12 @@
+// inspector-config.json (used with: bun run inspector)
+{
+  "mcpServers": {
+    "mongodb": {
+      "command": "node",
+      "args": [
+        "build/index.js",
+        "mongodb://username:password@localhost:27017/database"
+      ]
+    }
+  }
+}

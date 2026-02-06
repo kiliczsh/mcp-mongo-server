@@ -1,0 +1,13 @@
+// ~/.codeium/windsurf/mcp_config.json
+{
+  "mcpServers": {
+    "mongodb": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-mongo-server",
+        "mongodb://username:password@localhost:27017/database"
+      ]
+    }
+  }
+}

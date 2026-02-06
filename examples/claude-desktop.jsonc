@@ -1,0 +1,23 @@
+// ~/Library/Application Support/Claude/claude_desktop_config.json (MacOS)
+// %APPDATA%/Claude/claude_desktop_config.json (Windows)
+{
+  "mcpServers": {
+    "mongodb": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-mongo-server",
+        "mongodb://username:password@localhost:27017/database"
+      ]
+    },
+    "mongodb-readonly": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-mongo-server",
+        "mongodb://username:password@localhost:27017/database",
+        "--read-only"
+      ]
+    }
+  }
+}
