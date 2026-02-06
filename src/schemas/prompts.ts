@@ -3,6 +3,7 @@ import type {
   ListPromptsRequest,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Db, MongoClient } from "mongodb";
+import type { SendProgressFn } from "../server.js";
 
 export async function handleListPromptsRequest({
   request,
@@ -40,12 +41,14 @@ export async function handleGetPromptRequest({
   db,
   isReadOnlyMode,
   signal,
+  sendProgress,
 }: {
   request: GetPromptRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
   signal?: AbortSignal;
+  sendProgress?: SendProgressFn;
 }) {
   const { name, arguments: args = {} } = request.params;
 
@@ -65,12 +68,15 @@ export async function handleGetPromptRequest({
       throw new Error("Access to system collections is not allowed");
     }
 
+    await sendProgress?.(1, 3, "Getting schema");
     signal?.throwIfAborted();
     const schemaSample = await collection.findOne({});
+    await sendProgress?.(2, 3, "Getting stats");
     signal?.throwIfAborted();
     const stats = await collection
       .aggregate([{ $collStats: { count: {} } }])
       .toArray();
+    await sendProgress?.(3, 3, "Fetching samples");
     signal?.throwIfAborted();
     const sampleDocs = await collection.find({}).limit(5).toArray();
 

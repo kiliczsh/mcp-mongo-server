@@ -25,6 +25,28 @@ import {
 import { handleListResourceTemplatesRequest } from "./schemas/templates.js";
 import { handleListToolsRequest } from "./schemas/tools.js";
 
+export type SendProgressFn = (
+  progress: number,
+  total: number,
+  message?: string,
+) => Promise<void>;
+
+function createSendProgress(extra: {
+  _meta?: { progressToken?: string | number };
+  sendNotification: (notification: {
+    method: string;
+    params: unknown;
+  }) => Promise<void>;
+}): SendProgressFn | undefined {
+  const progressToken = extra._meta?.progressToken;
+  if (progressToken === undefined) return undefined;
+  return (progress, total, message) =>
+    extra.sendNotification({
+      method: "notifications/progress",
+      params: { progressToken, progress, total, message },
+    });
+}
+
 /**
  * Create an MCP server with capabilities for resources (to list/read collections),
  * tools (to query data), and prompts (to analyze collections).
@@ -88,6 +110,7 @@ export function createServer(
       db,
       isReadOnlyMode,
       signal: extra.signal,
+      sendProgress: createSendProgress(extra),
     }),
   );
 
@@ -140,6 +163,7 @@ export function createServer(
       db,
       isReadOnlyMode,
       signal: extra.signal,
+      sendProgress: createSendProgress(extra),
     }),
   );
 
