@@ -10,16 +10,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: oven-sh/setup-bun@v2
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           registry-url: https://registry.npmjs.org/
 
-      - name: Update npm to latest version
-        run: npm install -g npm@latest
-
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
 
       - name: Publish to npm
         run: npm publish --access public
