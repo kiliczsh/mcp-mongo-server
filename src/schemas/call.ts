@@ -1,3 +1,7 @@
+import type {
+  CreateTaskResult,
+  RequestTaskStore,
+} from "@modelcontextprotocol/sdk/experimental/tasks";
 import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
 import type {
   BulkWriteOptions,
@@ -65,12 +69,16 @@ export async function handleCallToolRequest({
   db,
   isReadOnlyMode,
   signal,
+  taskStore,
+  taskTtl,
 }: {
   request: CallToolRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
   signal?: AbortSignal;
+  taskStore?: RequestTaskStore;
+  taskTtl?: number | null;
 }) {
   const { name, arguments: args = {} } = request.params;
   const operation = name as MongoOperation;
@@ -120,7 +128,59 @@ export async function handleCallToolRequest({
 
   signal?.throwIfAborted();
 
-  // Route to the appropriate handler based on operation name
+  // Task-augmented request: create task, run async, return immediately
+  if (taskStore) {
+    const task = await taskStore.createTask({
+      ttl: taskTtl ?? undefined,
+    });
+
+    // Fire-and-forget: run the operation in the background
+    (async () => {
+      try {
+        const result = await executeOperation(
+          operation,
+          collection,
+          db,
+          isReadOnlyMode,
+          args,
+          objectIdMode,
+          signal,
+        );
+        await taskStore.storeTaskResult(task.taskId, "completed", result);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unknown error";
+        await taskStore.storeTaskResult(task.taskId, "failed", {
+          content: [{ type: "text", text: message }],
+          isError: true,
+        });
+      }
+    })();
+
+    return { task } as CreateTaskResult;
+  }
+
+  // Synchronous execution path
+  return executeOperation(
+    operation,
+    collection,
+    db,
+    isReadOnlyMode,
+    args,
+    objectIdMode,
+    signal,
+  );
+}
+
+async function executeOperation(
+  operation: MongoOperation,
+  collection: Collection<Document> | null,
+  db: Db,
+  isReadOnlyMode: boolean,
+  args: Record<string, unknown>,
+  objectIdMode: ObjectIdConversionMode,
+  signal?: AbortSignal,
+) {
   switch (operation) {
     case "query":
       return handleQuery(collection, args, objectIdMode, signal);

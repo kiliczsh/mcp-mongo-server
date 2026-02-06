@@ -20,6 +20,7 @@ export async function handleListToolsRequest({
         name: "query",
         description:
           "Execute a MongoDB query with optional execution plan analysis",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -66,6 +67,7 @@ export async function handleListToolsRequest({
         name: "aggregate",
         description:
           "Execute a MongoDB aggregation pipeline with optional execution plan analysis",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -100,6 +102,7 @@ export async function handleListToolsRequest({
       {
         name: "update",
         description: "Update documents in a MongoDB collection",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -140,6 +143,7 @@ export async function handleListToolsRequest({
         name: "serverInfo",
         description:
           "Get MongoDB server information including version, storage engine, and other details",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -154,6 +158,7 @@ export async function handleListToolsRequest({
       {
         name: "insert",
         description: "Insert one or more documents into a MongoDB collection",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -192,6 +197,7 @@ export async function handleListToolsRequest({
       {
         name: "createIndex",
         description: "Create one or more indexes on a MongoDB collection",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -258,6 +264,7 @@ export async function handleListToolsRequest({
       {
         name: "count",
         description: "Count documents in a collection matching a query",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -288,6 +295,7 @@ export async function handleListToolsRequest({
       {
         name: "listCollections",
         description: "List all collections in the MongoDB database",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {

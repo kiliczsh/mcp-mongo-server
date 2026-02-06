@@ -1,3 +1,7 @@
+import {
+  InMemoryTaskMessageQueue,
+  InMemoryTaskStore,
+} from "@modelcontextprotocol/sdk/experimental/tasks";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
@@ -57,6 +61,9 @@ export function createServer(
   isReadOnlyMode = false,
   options = {},
 ) {
+  const taskStore = new InMemoryTaskStore();
+  const taskMessageQueue = new InMemoryTaskMessageQueue();
+
   const server = new Server(
     {
       name: "mongodb",
@@ -69,7 +76,14 @@ export function createServer(
         resources: {},
         tools: {},
         prompts: {},
+        tasks: {
+          list: {},
+          cancel: {},
+          requests: { tools: { call: {} } },
+        },
       },
+      taskStore,
+      taskMessageQueue,
       ...options,
     },
   );
@@ -137,6 +151,8 @@ export function createServer(
       db,
       isReadOnlyMode,
       signal: extra.signal,
+      taskStore: extra.taskStore,
+      taskTtl: extra.taskRequestedTtl,
     }),
   );
 
