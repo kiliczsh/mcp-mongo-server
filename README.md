@@ -28,6 +28,10 @@ A Model Context Protocol server that enables LLMs to interact with MongoDB datab
 npx -y mcp-mongo-server mongodb://localhost:27017/database
 ```
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/kiliczsh-mcp-mongo-server).
+
 ## Usage
 
 ```bash
