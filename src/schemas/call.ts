@@ -1,6 +1,10 @@
 import type { CreateTaskResult } from "@modelcontextprotocol/sdk/experimental/tasks";
 import type { RequestTaskStore } from "@modelcontextprotocol/sdk/shared/protocol.js";
-import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
+import {
+  type CallToolRequest,
+  ErrorCode,
+  McpError,
+} from "@modelcontextprotocol/sdk/types.js";
 import type {
   BulkWriteOptions,
   CollationOptions,
@@ -100,78 +104,90 @@ export async function handleCallToolRequest({
   // Replace the original args with the filtered version
   Object.assign(args, filteredArgs);
 
-  // Validate operation name
+  // Validate operation name. An unknown tool name is a protocol error
+  // (InvalidParams); everything past this point reports failures as tool
+  // execution errors so the model can see and correct them (SEP-1303).
   validateOperation(operation);
 
-  // Check if operation is allowed in read-only mode
-  checkReadOnlyMode(operation, isReadOnlyMode);
+  try {
+    // Check if operation is allowed in read-only mode
+    checkReadOnlyMode(operation, isReadOnlyMode);
 
-  // Get collection only if the operation requires it
-  let collection: Collection<Document> | null = null;
+    // Get collection only if the operation requires it
+    let collection: Collection<Document> | null = null;
 
-  if (COLLECTION_OPERATIONS.includes(operation)) {
-    const collectionName = args.collection as string;
+    if (COLLECTION_OPERATIONS.includes(operation)) {
+      const collectionName = args.collection as string;
 
-    if (!collectionName) {
-      throw new Error(
-        `Collection name is required for '${operation}' operation`,
-      );
+      if (!collectionName) {
+        throw new Error(
+          `Collection name is required for '${operation}' operation`,
+        );
+      }
+
+      collection = db.collection(collectionName);
+
+      // Validate collection
+      validateCollection(collection);
     }
 
-    collection = db.collection(collectionName);
+    signal?.throwIfAborted();
 
-    // Validate collection
-    validateCollection(collection);
-  }
+    // Task-augmented request: create task, run async, return immediately
+    if (taskStore) {
+      const task = await taskStore.createTask({
+        ttl: taskTtl ?? undefined,
+      });
 
-  signal?.throwIfAborted();
-
-  // Task-augmented request: create task, run async, return immediately
-  if (taskStore) {
-    const task = await taskStore.createTask({
-      ttl: taskTtl ?? undefined,
-    });
-
-    // Fire-and-forget: run the operation in the background
-    (async () => {
-      try {
-        const result = await executeOperation(
-          operation,
-          collection,
-          db,
-          isReadOnlyMode,
-          args,
-          objectIdMode,
-          signal,
-        );
-        await taskStore.storeTaskResult(task.taskId, "completed", result);
-      } catch (error) {
+      // Fire-and-forget: run the operation in the background
+      (async () => {
         try {
-          const message =
-            error instanceof Error ? error.message : "Unknown error";
-          await taskStore.storeTaskResult(task.taskId, "failed", {
-            content: [{ type: "text", text: message }],
-            isError: true,
-          });
-        } catch {
-          // Task may already be in a terminal state (cancelled, completed, or failed)
+          const result = await executeOperation(
+            operation,
+            collection,
+            db,
+            isReadOnlyMode,
+            args,
+            objectIdMode,
+            signal,
+          );
+          await taskStore.storeTaskResult(task.taskId, "completed", result);
+        } catch (error) {
+          try {
+            const message =
+              error instanceof Error ? error.message : "Unknown error";
+            await taskStore.storeTaskResult(task.taskId, "failed", {
+              content: [{ type: "text", text: message }],
+              isError: true,
+            });
+          } catch {
+            // Task may already be in a terminal state (cancelled, completed, or failed)
+          }
         }
-      }
-    })();
+      })();
 
-    return { task } as CreateTaskResult;
+      return { task } as CreateTaskResult;
+    }
+
+    // Synchronous execution path
+    return await executeOperation(
+      operation,
+      collection,
+      db,
+      isReadOnlyMode,
+      args,
+      objectIdMode,
+      signal,
+    );
+  } catch (error) {
+    // Protocol-level errors and cancellation propagate unchanged
+    if (error instanceof McpError || signal?.aborted) {
+      throw error;
+    }
+    return toolExecutionError(
+      error instanceof Error ? error.message : "Unknown error",
+    );
   }
-
-  // Synchronous execution path
-  return executeOperation(
-    operation,
-    collection,
-    db,
-    isReadOnlyMode,
-    args,
-    objectIdMode,
-    signal,
-  );
 }
 
 async function executeOperation(
@@ -201,7 +217,7 @@ async function executeOperation(
     case "listCollections":
       return handleListCollections(db, args, objectIdMode, signal);
     default:
-      throw new Error(`Unknown operation: ${operation}`);
+      throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${operation}`);
   }
 }
 
@@ -220,7 +236,7 @@ function validateOperation(operation: MongoOperation): void {
   ];
 
   if (!validOperations.includes(operation)) {
-    throw new Error(`Unknown operation: ${operation}`);
+    throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${operation}`);
   }
 }
 
@@ -449,18 +465,30 @@ function formatResponse(data: unknown): {
   };
 }
 
+function toolExecutionError(message: string): {
+  content: [{ type: string; text: string }];
+  isError: true;
+} {
+  return {
+    content: [{ type: "text", text: message }],
+    isError: true,
+  };
+}
+
 function handleError(
   error: unknown,
   operation: string,
   collectionName?: string,
-): never {
-  const context = collectionName ? `collection ${collectionName}` : "operation";
-
-  if (error instanceof Error) {
-    throw new Error(`Failed to ${operation} ${context}: ${error.message}`);
+): ReturnType<typeof toolExecutionError> {
+  // Cancellation is not a tool failure — let it propagate to the protocol layer
+  if (error instanceof Error && error.name === "AbortError") {
+    throw error;
   }
 
-  throw new Error(`Failed to ${operation} ${context}: Unknown error`);
+  const context = collectionName ? `collection ${collectionName}` : "operation";
+  const message = error instanceof Error ? error.message : "Unknown error";
+
+  return toolExecutionError(`Failed to ${operation} ${context}: ${message}`);
 }
 
 // Operation handlers
