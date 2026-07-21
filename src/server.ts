@@ -38,8 +38,13 @@ export type SendProgressFn = (
 function createSendProgress(extra: {
   _meta?: { progressToken?: string | number };
   sendNotification: (notification: {
-    method: string;
-    params: unknown;
+    method: "notifications/progress";
+    params: {
+      progressToken: string | number;
+      progress: number;
+      total?: number;
+      message?: string;
+    };
   }) => Promise<void>;
 }): SendProgressFn | undefined {
   const progressToken = extra._meta?.progressToken;

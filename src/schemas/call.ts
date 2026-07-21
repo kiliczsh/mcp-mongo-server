@@ -1,7 +1,5 @@
-import type {
-  CreateTaskResult,
-  RequestTaskStore,
-} from "@modelcontextprotocol/sdk/experimental/tasks";
+import type { CreateTaskResult } from "@modelcontextprotocol/sdk/experimental/tasks";
+import type { RequestTaskStore } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
 import type {
   BulkWriteOptions,

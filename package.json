@@ -23,7 +23,7 @@
     "inspector": "mcp-inspector --config inspector-config.json --server mongodb"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "mongodb": "^7.1.0",
     "zod": "^3.25.76"
   },
