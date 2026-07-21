@@ -6,11 +6,13 @@ export async function handleListToolsRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
 }: {
   request: ListToolsRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
 }) {
   return {
     tools: [
@@ -18,6 +20,7 @@ export async function handleListToolsRequest({
         name: "query",
         description:
           "Execute a MongoDB query with optional execution plan analysis",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -39,6 +42,12 @@ export async function handleListToolsRequest({
               description: "Maximum number of documents to return",
               default: 10,
             },
+            skip: {
+              type: "number",
+              description:
+                "Number of documents to skip before returning results",
+              default: 0,
+            },
             explain: {
               type: "string",
               description: "Optional: Get query execution information",
@@ -58,6 +67,7 @@ export async function handleListToolsRequest({
         name: "aggregate",
         description:
           "Execute a MongoDB aggregation pipeline with optional execution plan analysis",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -92,6 +102,7 @@ export async function handleListToolsRequest({
       {
         name: "update",
         description: "Update documents in a MongoDB collection",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -132,6 +143,7 @@ export async function handleListToolsRequest({
         name: "serverInfo",
         description:
           "Get MongoDB server information including version, storage engine, and other details",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -146,6 +158,7 @@ export async function handleListToolsRequest({
       {
         name: "insert",
         description: "Insert one or more documents into a MongoDB collection",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -184,6 +197,7 @@ export async function handleListToolsRequest({
       {
         name: "createIndex",
         description: "Create one or more indexes on a MongoDB collection",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -250,6 +264,7 @@ export async function handleListToolsRequest({
       {
         name: "count",
         description: "Count documents in a collection matching a query",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -280,6 +295,7 @@ export async function handleListToolsRequest({
       {
         name: "listCollections",
         description: "List all collections in the MongoDB database",
+        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -290,6 +306,17 @@ export async function handleListToolsRequest({
             filter: {
               type: "object",
               description: "Filter for collections",
+            },
+            skip: {
+              type: "number",
+              description:
+                "Number of collections to skip before returning results",
+              default: 0,
+            },
+            limit: {
+              type: "number",
+              description: "Maximum number of collections to return",
+              default: 20,
             },
             objectIdMode: {
               type: "string",

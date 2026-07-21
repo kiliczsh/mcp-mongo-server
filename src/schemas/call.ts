@@ -1,4 +1,10 @@
-import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
+import type { CreateTaskResult } from "@modelcontextprotocol/sdk/experimental/tasks";
+import type { RequestTaskStore } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import {
+  type CallToolRequest,
+  ErrorCode,
+  McpError,
+} from "@modelcontextprotocol/sdk/types.js";
 import type {
   BulkWriteOptions,
   CollationOptions,
@@ -64,11 +70,17 @@ export async function handleCallToolRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
+  taskStore,
+  taskTtl,
 }: {
   request: CallToolRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
+  taskStore?: RequestTaskStore;
+  taskTtl?: number | null;
 }) {
   const { name, arguments: args = {} } = request.params;
   const operation = name as MongoOperation;
@@ -92,50 +104,120 @@ export async function handleCallToolRequest({
   // Replace the original args with the filtered version
   Object.assign(args, filteredArgs);
 
-  // Validate operation name
+  // Validate operation name. An unknown tool name is a protocol error
+  // (InvalidParams); everything past this point reports failures as tool
+  // execution errors so the model can see and correct them (SEP-1303).
   validateOperation(operation);
 
-  // Check if operation is allowed in read-only mode
-  checkReadOnlyMode(operation, isReadOnlyMode);
+  try {
+    // Check if operation is allowed in read-only mode
+    checkReadOnlyMode(operation, isReadOnlyMode);
 
-  // Get collection only if the operation requires it
-  let collection: Collection<Document> | null = null;
+    // Get collection only if the operation requires it
+    let collection: Collection<Document> | null = null;
 
-  if (COLLECTION_OPERATIONS.includes(operation)) {
-    const collectionName = args.collection as string;
+    if (COLLECTION_OPERATIONS.includes(operation)) {
+      const collectionName = args.collection as string;
 
-    if (!collectionName) {
-      throw new Error(
-        `Collection name is required for '${operation}' operation`,
-      );
+      if (!collectionName) {
+        throw new Error(
+          `Collection name is required for '${operation}' operation`,
+        );
+      }
+
+      collection = db.collection(collectionName);
+
+      // Validate collection
+      validateCollection(collection);
     }
 
-    collection = db.collection(collectionName);
+    signal?.throwIfAborted();
 
-    // Validate collection
-    validateCollection(collection);
+    // Task-augmented request: create task, run async, return immediately
+    if (taskStore) {
+      const task = await taskStore.createTask({
+        ttl: taskTtl ?? undefined,
+      });
+
+      // Fire-and-forget: run the operation in the background
+      (async () => {
+        try {
+          const result = await executeOperation(
+            operation,
+            collection,
+            db,
+            isReadOnlyMode,
+            args,
+            objectIdMode,
+            signal,
+          );
+          await taskStore.storeTaskResult(task.taskId, "completed", result);
+        } catch (error) {
+          try {
+            const message =
+              error instanceof Error ? error.message : "Unknown error";
+            await taskStore.storeTaskResult(task.taskId, "failed", {
+              content: [{ type: "text", text: message }],
+              isError: true,
+            });
+          } catch {
+            // Task may already be in a terminal state (cancelled, completed, or failed)
+          }
+        }
+      })();
+
+      return { task } as CreateTaskResult;
+    }
+
+    // Synchronous execution path
+    return await executeOperation(
+      operation,
+      collection,
+      db,
+      isReadOnlyMode,
+      args,
+      objectIdMode,
+      signal,
+    );
+  } catch (error) {
+    // Protocol-level errors and cancellation propagate unchanged
+    if (error instanceof McpError || signal?.aborted) {
+      throw error;
+    }
+    return toolExecutionError(
+      error instanceof Error ? error.message : "Unknown error",
+    );
   }
+}
 
-  // Route to the appropriate handler based on operation name
+async function executeOperation(
+  operation: MongoOperation,
+  collection: Collection<Document> | null,
+  db: Db,
+  isReadOnlyMode: boolean,
+  args: Record<string, unknown>,
+  objectIdMode: ObjectIdConversionMode,
+  signal?: AbortSignal,
+) {
   switch (operation) {
     case "query":
-      return handleQuery(collection, args, objectIdMode);
+      return handleQuery(collection, args, objectIdMode, signal);
     case "aggregate":
-      return handleAggregate(collection, args, objectIdMode);
+      return handleAggregate(collection, args, objectIdMode, signal);
     case "update":
-      return handleUpdate(collection, args, objectIdMode);
+      return handleUpdate(collection, args, objectIdMode, signal);
     case "serverInfo":
-      return handleServerInfo(db, isReadOnlyMode, args);
+      return handleServerInfo(db, isReadOnlyMode, args, signal);
     case "insert":
-      return handleInsert(collection, args, objectIdMode);
+      return handleInsert(collection, args, objectIdMode, signal);
     case "createIndex":
-      return handleCreateIndex(collection, args, objectIdMode);
+      return handleCreateIndex(collection, args, objectIdMode, signal);
     case "count":
-      return handleCount(collection, args, objectIdMode);
+      return handleCount(collection, args, objectIdMode, signal);
     case "listCollections":
-      return handleListCollections(db, args, objectIdMode);
+      return handleListCollections(db, args, objectIdMode, signal);
     default:
-      throw new Error(`Unknown operation: ${operation}`);
+      throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${operation}`);
   }
 }
 
@@ -154,7 +236,7 @@ function validateOperation(operation: MongoOperation): void {
   ];
 
   if (!validOperations.includes(operation)) {
-    throw new Error(`Unknown operation: ${operation}`);
+    throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${operation}`);
   }
 }
 
@@ -383,18 +465,30 @@ function formatResponse(data: unknown): {
   };
 }
 
+function toolExecutionError(message: string): {
+  content: [{ type: string; text: string }];
+  isError: true;
+} {
+  return {
+    content: [{ type: "text", text: message }],
+    isError: true,
+  };
+}
+
 function handleError(
   error: unknown,
   operation: string,
   collectionName?: string,
-): never {
-  const context = collectionName ? `collection ${collectionName}` : "operation";
-
-  if (error instanceof Error) {
-    throw new Error(`Failed to ${operation} ${context}: ${error.message}`);
+): ReturnType<typeof toolExecutionError> {
+  // Cancellation is not a tool failure — let it propagate to the protocol layer
+  if (error instanceof Error && error.name === "AbortError") {
+    throw error;
   }
 
-  throw new Error(`Failed to ${operation} ${context}: Unknown error`);
+  const context = collectionName ? `collection ${collectionName}` : "operation";
+  const message = error instanceof Error ? error.message : "Unknown error";
+
+  return toolExecutionError(`Failed to ${operation} ${context}: ${message}`);
 }
 
 // Operation handlers
@@ -403,18 +497,23 @@ async function handleQuery(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for query operation");
   }
-  const { filter, projection, limit, explain, sort } = args;
+  const { filter, projection, explain, sort } = args;
+  const limit = (args.limit as number) || 10;
+  const skip = (args.skip as number) || 0;
   const queryFilter = parseFilter(filter, objectIdMode);
   try {
     if (explain) {
+      signal?.throwIfAborted();
       const explainResult = await collection
         .find(queryFilter, {
           projection,
-          limit: limit || 100,
+          limit,
+          skip,
           sort,
         } as FindOptions)
         .explain(explain as string);
@@ -422,14 +521,29 @@ async function handleQuery(
       return formatResponse(explainResult);
     }
 
-    const cursor = collection.find(queryFilter, {
-      projection,
-      limit: limit || 100,
-      sort,
-    } as FindOptions);
-    const results = await cursor.toArray();
+    signal?.throwIfAborted();
+    const [total, results] = await Promise.all([
+      collection.countDocuments(queryFilter),
+      collection
+        .find(queryFilter, {
+          projection,
+          limit,
+          skip,
+          sort,
+        } as FindOptions)
+        .toArray(),
+    ]);
 
-    return formatResponse(results);
+    return formatResponse({
+      results,
+      metadata: {
+        total,
+        returned: results.length,
+        skip,
+        limit,
+        hasMore: skip + results.length < total,
+      },
+    });
   } catch (error) {
     return handleError(error, "query", collection.collectionName);
   }
@@ -439,6 +553,7 @@ async function handleAggregate(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for aggregate operation");
@@ -462,6 +577,7 @@ async function handleAggregate(
 
   try {
     if (explain) {
+      signal?.throwIfAborted();
       const explainResult = await collection
         .aggregate(processedPipeline, {
           explain: {
@@ -473,8 +589,14 @@ async function handleAggregate(
       return formatResponse(explainResult);
     }
 
+    signal?.throwIfAborted();
     const results = await collection.aggregate(processedPipeline).toArray();
-    return formatResponse(results);
+    return formatResponse({
+      results,
+      metadata: {
+        returned: results.length,
+      },
+    });
   } catch (error) {
     return handleError(error, "aggregate", collection.collectionName);
   }
@@ -484,6 +606,7 @@ async function handleUpdate(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for update operation");
@@ -540,6 +663,7 @@ async function handleUpdate(
 
     // Use updateOne or updateMany based on multi option
     const updateMethod = options.multi ? "updateMany" : "updateOne";
+    signal?.throwIfAborted();
     const result = await collection[updateMethod](
       queryFilter,
       processedUpdate,
@@ -561,16 +685,19 @@ async function handleServerInfo(
   db: Db,
   isReadOnlyMode: boolean,
   args: Record<string, unknown>,
+  signal?: AbortSignal,
 ) {
   const { includeDebugInfo } = args;
 
   try {
     // Get basic server information using buildInfo command
+    signal?.throwIfAborted();
     const buildInfo = await db.command({ buildInfo: 1 });
 
     // Get additional server status if debug info is requested
     let serverStatus = null;
     if (includeDebugInfo) {
+      signal?.throwIfAborted();
       serverStatus = await db.command({ serverStatus: 1 });
     }
 
@@ -625,6 +752,7 @@ async function handleInsert(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for insert operation");
@@ -662,6 +790,7 @@ async function handleInsert(
     };
 
     // Use insertMany for consistency, it works for single documents too
+    signal?.throwIfAborted();
     const result = await collection.insertMany(
       processedDocuments as Document[],
       options,
@@ -693,6 +822,7 @@ async function handleCreateIndex(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for createIndex operation");
@@ -740,6 +870,7 @@ async function handleCreateIndex(
       commitQuorum: typeof commitQuorum === "number" ? commitQuorum : undefined,
     };
 
+    signal?.throwIfAborted();
     const result = await collection.createIndexes(
       processedIndexes,
       indexOptions,
@@ -763,6 +894,7 @@ async function handleCount(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for count operation");
@@ -798,6 +930,7 @@ async function handleCount(
     }
 
     // Execute count operation
+    signal?.throwIfAborted();
     const count = await collection.countDocuments(countQuery, options);
 
     return formatResponse({
@@ -813,8 +946,11 @@ async function handleListCollections(
   db: Db,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  signal?: AbortSignal,
 ) {
   const { nameOnly, filter } = args;
+  const skip = (args.skip as number) || 0;
+  const limit = (args.limit as number) || 20;
 
   // Process ObjectId strings in filter if present
   let processedFilter = filter;
@@ -828,14 +964,27 @@ async function handleListCollections(
   try {
     // Get the list of collections
     const options = processedFilter ? { filter: processedFilter } : {};
+    signal?.throwIfAborted();
     const collections = await db.listCollections(options).toArray();
 
     // If nameOnly is true, return only the collection names
-    const result = nameOnly
+    const allResults = nameOnly
       ? collections.map((collection) => collection.name)
       : collections;
 
-    return formatResponse(result);
+    const total = allResults.length;
+    const paged = allResults.slice(skip, skip + limit);
+
+    return formatResponse({
+      results: paged,
+      metadata: {
+        total,
+        returned: paged.length,
+        skip,
+        limit,
+        hasMore: skip + paged.length < total,
+      },
+    });
   } catch (error) {
     return handleError(error, "list collections");
   }

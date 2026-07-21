@@ -6,11 +6,13 @@ export async function handleListResourceTemplatesRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
 }: {
   request: ListResourceTemplatesRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
 }) {
   return {
     resourceTemplates: [

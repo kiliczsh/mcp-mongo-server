@@ -4,3 +4,9 @@ build/
 .env*
 .DS_Store
 inspector-config.json
+
+# Local test environment (secrets, TLS certs)
+.testenv/
+
+# Local MCP config with test credentials
+.mcp.json

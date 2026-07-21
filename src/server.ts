@@ -1,3 +1,7 @@
+import {
+  InMemoryTaskMessageQueue,
+  InMemoryTaskStore,
+} from "@modelcontextprotocol/sdk/experimental/tasks";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
@@ -25,6 +29,33 @@ import {
 import { handleListResourceTemplatesRequest } from "./schemas/templates.js";
 import { handleListToolsRequest } from "./schemas/tools.js";
 
+export type SendProgressFn = (
+  progress: number,
+  total: number,
+  message?: string,
+) => Promise<void>;
+
+function createSendProgress(extra: {
+  _meta?: { progressToken?: string | number };
+  sendNotification: (notification: {
+    method: "notifications/progress";
+    params: {
+      progressToken: string | number;
+      progress: number;
+      total?: number;
+      message?: string;
+    };
+  }) => Promise<void>;
+}): SendProgressFn | undefined {
+  const progressToken = extra._meta?.progressToken;
+  if (progressToken === undefined) return undefined;
+  return (progress, total, message) =>
+    extra.sendNotification({
+      method: "notifications/progress",
+      params: { progressToken, progress, total, message },
+    });
+}
+
 /**
  * Create an MCP server with capabilities for resources (to list/read collections),
  * tools (to query data), and prompts (to analyze collections).
@@ -35,10 +66,17 @@ export function createServer(
   isReadOnlyMode = false,
   options = {},
 ) {
+  const taskStore = new InMemoryTaskStore();
+  const taskMessageQueue = new InMemoryTaskMessageQueue();
+
   const server = new Server(
     {
       name: "mongodb",
-      version: "2.0.2",
+      title: "MongoDB MCP Server",
+      version: "2.1.0",
+      description:
+        "MCP server for MongoDB: query, aggregate, and manage collections with read-only mode, progress notifications, cancellation, and task support",
+      websiteUrl: "https://github.com/kiliczsh/mcp-mongo-server",
       ...options,
     },
     {
@@ -47,7 +85,14 @@ export function createServer(
         resources: {},
         tools: {},
         prompts: {},
+        tasks: {
+          list: {},
+          cancel: {},
+          requests: { tools: { call: {} } },
+        },
       },
+      taskStore,
+      taskMessageQueue,
       ...options,
     },
   );
@@ -55,64 +100,126 @@ export function createServer(
   /**
    * Handler for ping requests to check server health
    */
-  server.setRequestHandler(PingRequestSchema, (request) =>
-    handlePingRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(PingRequestSchema, (request, extra) =>
+    handlePingRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   /**
    * Handler for listing available collections as resources.
    */
-  server.setRequestHandler(ListResourcesRequestSchema, (request) =>
-    handleListResourcesRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(ListResourcesRequestSchema, (request, extra) =>
+    handleListResourcesRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   /**
    * Handler for reading a collection's schema or contents.
    */
-  server.setRequestHandler(ReadResourceRequestSchema, (request) =>
-    handleReadResourceRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(ReadResourceRequestSchema, (request, extra) =>
+    handleReadResourceRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+      sendProgress: createSendProgress(extra),
+    }),
   );
 
   /**
    * Handler that lists available tools.
    */
-  server.setRequestHandler(ListToolsRequestSchema, (request) =>
-    handleListToolsRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(ListToolsRequestSchema, (request, extra) =>
+    handleListToolsRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   /**
    * Handler for MongoDB tools.
    */
-  server.setRequestHandler(CallToolRequestSchema, (request) =>
-    handleCallToolRequest({ request, client, db, isReadOnlyMode }),
-  );
+  server.setRequestHandler(CallToolRequestSchema, (request, extra) => {
+    // Only enter task path when the client explicitly requests it
+    const hasTaskParams = !!(request.params as Record<string, unknown>).task;
+    return handleCallToolRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+      taskStore: hasTaskParams ? extra.taskStore : undefined,
+      taskTtl: hasTaskParams ? extra.taskRequestedTtl : undefined,
+    });
+  });
 
   /**
    * Handler that lists available prompts.
    */
-  server.setRequestHandler(ListPromptsRequestSchema, (request) =>
-    handleListPromptsRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(ListPromptsRequestSchema, (request, extra) =>
+    handleListPromptsRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   /**
    * Handler for collection analysis prompt.
    */
-  server.setRequestHandler(GetPromptRequestSchema, (request) =>
-    handleGetPromptRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(GetPromptRequestSchema, (request, extra) =>
+    handleGetPromptRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+      sendProgress: createSendProgress(extra),
+    }),
   );
 
   /**
    * Handler for listing templates.
    */
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, (request) =>
-    handleListResourceTemplatesRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(
+    ListResourceTemplatesRequestSchema,
+    (request, extra) =>
+      handleListResourceTemplatesRequest({
+        request,
+        client,
+        db,
+        isReadOnlyMode,
+        signal: extra.signal,
+      }),
   );
 
   /**
    * Handler for completion requests.
    */
-  server.setRequestHandler(CompleteRequestSchema, (request) =>
-    handleCompletionRequest({ request, client, db, isReadOnlyMode }),
+  server.setRequestHandler(CompleteRequestSchema, (request, extra) =>
+    handleCompletionRequest({
+      request,
+      client,
+      db,
+      isReadOnlyMode,
+      signal: extra.signal,
+    }),
   );
 
   return server;
