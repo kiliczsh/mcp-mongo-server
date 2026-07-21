@@ -62,6 +62,44 @@ const COLLECTION_OPERATIONS = [
 // Define write operations that are blocked in read-only mode
 const WRITE_OPERATIONS = ["update", "insert", "createIndex"];
 
+// Aggregation stages/operators that must never run in read-only mode:
+// write stages ($out, $merge) can create or replace collections, and
+// server-side JavaScript operators ($function, $accumulator, $where) allow
+// arbitrary code execution. All are matched case-sensitively as object keys.
+const READONLY_FORBIDDEN_AGG_OPERATORS = new Set([
+  "$out",
+  "$merge",
+  "$function",
+  "$accumulator",
+  "$where",
+]);
+
+/**
+ * Recursively scan an aggregation pipeline for operators that are forbidden in
+ * read-only mode. Returns the first forbidden operator found, or null.
+ */
+function findForbiddenAggOperator(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findForbiddenAggOperator(item);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  if (value && typeof value === "object") {
+    for (const [key, nested] of Object.entries(value)) {
+      if (READONLY_FORBIDDEN_AGG_OPERATORS.has(key)) {
+        return key;
+      }
+      const found = findForbiddenAggOperator(nested);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
 // ObjectId conversion settings
 type ObjectIdConversionMode = "auto" | "none" | "force";
 
@@ -203,7 +241,13 @@ async function executeOperation(
     case "query":
       return handleQuery(collection, args, objectIdMode, signal);
     case "aggregate":
-      return handleAggregate(collection, args, objectIdMode, signal);
+      return handleAggregate(
+        collection,
+        args,
+        objectIdMode,
+        isReadOnlyMode,
+        signal,
+      );
     case "update":
       return handleUpdate(collection, args, objectIdMode, signal);
     case "serverInfo":
@@ -553,6 +597,7 @@ async function handleAggregate(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  isReadOnlyMode = false,
   signal?: AbortSignal,
 ) {
   if (!collection) {
@@ -562,6 +607,18 @@ async function handleAggregate(
 
   if (!Array.isArray(pipeline)) {
     throw new Error("Pipeline must be an array");
+  }
+
+  // In read-only mode, reject pipelines that could write to the database or
+  // execute server-side JavaScript. Without this an aggregate ending in $out
+  // or $merge would bypass read-only protection and overwrite collections.
+  if (isReadOnlyMode) {
+    const forbidden = findForbiddenAggOperator(pipeline);
+    if (forbidden) {
+      throw new Error(
+        `ReadonlyError: Aggregation operator '${forbidden}' is not allowed in read-only mode`,
+      );
+    }
   }
 
   // Process any ObjectId strings in the pipeline
