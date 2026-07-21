@@ -762,7 +762,6 @@ async function handleServerInfo(
       ok: buildInfo.ok,
       connectionInfo: {
         readOnlyMode: isReadOnlyMode,
-        readPreference: isReadOnlyMode ? "secondary" : "primary",
       },
     };
 

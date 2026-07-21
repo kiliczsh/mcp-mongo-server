@@ -1,4 +1,4 @@
-import { type Db, MongoClient, ReadPreference } from "mongodb";
+import { type Db, MongoClient } from "mongodb";
 
 /**
  * Initialize MongoDB connection
@@ -16,11 +16,11 @@ export async function connectToMongoDB(
   isReadOnlyMode: boolean;
 }> {
   try {
-    const options = readOnly
-      ? { readPreference: ReadPreference.SECONDARY }
-      : {};
-
-    const client = new MongoClient(url, options);
+    // Read-only mode is enforced at the application layer (write tools and
+    // aggregation write/JS operators are rejected). It must not set a
+    // readPreference: that provides no write protection and breaks single-node
+    // replica sets, where selecting a secondary times out.
+    const client = new MongoClient(url);
     await client.connect();
     const db = client.db();
 
