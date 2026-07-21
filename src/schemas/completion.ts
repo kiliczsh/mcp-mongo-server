@@ -3,6 +3,7 @@ import type {
   CompleteResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { CollectionInfo, Db, MongoClient } from "mongodb";
+import { paginate } from "../utils/pagination.js";
 
 /**
  * Handles completion requests from the Model Context Protocol
@@ -14,11 +15,13 @@ export async function handleCompletionRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
 }: {
   request: CompleteRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
 }): Promise<CompleteResult> {
   const { ref, argument } = request.params;
 
@@ -30,6 +33,7 @@ export async function handleCompletionRequest({
       isReadOnlyMode,
       ref.name,
       argument,
+      signal,
     );
   }
 
@@ -41,6 +45,7 @@ export async function handleCompletionRequest({
       isReadOnlyMode,
       ref.uri,
       argument,
+      signal,
     );
   }
 
@@ -63,6 +68,7 @@ async function handlePromptCompletion(
   isReadOnlyMode: boolean,
   promptName: string | undefined,
   argument: { name: string; value: string },
+  signal?: AbortSignal,
 ): Promise<CompleteResult> {
   if (!promptName) {
     return emptyCompletionResult();
@@ -70,7 +76,12 @@ async function handlePromptCompletion(
 
   // Handle collection name completions
   if (argument.name === "collection") {
-    return await completeCollectionNames(argument.value, db, isReadOnlyMode);
+    return await completeCollectionNames(
+      argument.value,
+      db,
+      isReadOnlyMode,
+      signal,
+    );
   }
 
   // Add other prompt completions here as needed
@@ -93,6 +104,7 @@ async function handleResourceCompletion(
   isReadOnlyMode: boolean,
   promptName: string | undefined,
   argument: { name: string; value: string },
+  signal?: AbortSignal,
 ): Promise<CompleteResult> {
   if (!promptName) {
     return emptyCompletionResult();
@@ -100,7 +112,12 @@ async function handleResourceCompletion(
 
   // Handle collection name completions
   if (argument.name === "collection") {
-    return await completeCollectionNames(argument.value, db, isReadOnlyMode);
+    return await completeCollectionNames(
+      argument.value,
+      db,
+      isReadOnlyMode,
+      signal,
+    );
   }
 
   // Add other prompt completions here as needed
@@ -119,6 +136,7 @@ async function completeCollectionNames(
   partialValue: string,
   db: Db,
   isReadOnlyMode: boolean,
+  signal?: AbortSignal,
 ): Promise<CompleteResult> {
   try {
     console.warn(
@@ -126,6 +144,7 @@ async function completeCollectionNames(
     );
 
     // Get list of collections
+    signal?.throwIfAborted();
     const collections: (
       | CollectionInfo
       | Pick<CollectionInfo, "type" | "name">
@@ -148,16 +167,19 @@ async function completeCollectionNames(
 
     console.warn(`Found ${matchingCollections.length} matching collections`);
 
-    // Limit to 100 items as per spec
-    const MAX_ITEMS = 100;
-    const limitedResults = matchingCollections.slice(0, MAX_ITEMS);
-    const hasMore = matchingCollections.length > MAX_ITEMS;
+    // Paginate results using cursor-based pagination (page size 100 per spec)
+    const PAGE_SIZE = 100;
+    const { items: limitedResults, nextCursor } = paginate(
+      matchingCollections,
+      undefined,
+      PAGE_SIZE,
+    );
 
     return {
       completion: {
         values: limitedResults,
         total: matchingCollections.length,
-        hasMore,
+        hasMore: !!nextCursor,
       },
     };
   } catch (error) {

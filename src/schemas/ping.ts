@@ -6,11 +6,13 @@ export async function handlePingRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
 }: {
   request: PingRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
 }) {
   try {
     // Check MongoDB connection
@@ -19,6 +21,7 @@ export async function handlePingRequest({
     }
 
     // Ping MongoDB to verify connection
+    signal?.throwIfAborted();
     const pong = await db.command({ ping: 1 });
 
     if (pong.ok !== 1) {

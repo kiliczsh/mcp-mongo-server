@@ -10,6 +10,8 @@ import type {
   MongoClient,
 } from "mongodb";
 import { ObjectId } from "mongodb";
+import type { SendProgressFn } from "../server.js";
+import { paginate } from "../utils/pagination.js";
 
 // Define interfaces for schema inference
 interface FieldInfo {
@@ -193,11 +195,15 @@ export async function handleReadResourceRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
+  sendProgress,
 }: {
   request: ReadResourceRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
+  sendProgress?: SendProgressFn;
 }) {
   const url = new URL(request.params.uri);
   const collectionName = url.pathname.replace(/^\//, "");
@@ -209,8 +215,10 @@ export async function handleReadResourceRequest({
     const sampleSize = 100;
     let sampleDocuments: Document[] = [];
 
+    await sendProgress?.(1, 4, "Sampling documents");
     try {
       // First try using MongoDB's $sample aggregation to get a diverse set of documents
+      signal?.throwIfAborted();
       sampleDocuments = await collection
         .aggregate([{ $sample: { size: sampleSize } }])
         .toArray();
@@ -219,19 +227,24 @@ export async function handleReadResourceRequest({
       console.warn(
         `$sample aggregation failed for ${collectionName}, falling back to sequential scan: ${sampleError}`,
       );
+      signal?.throwIfAborted();
       sampleDocuments = await collection.find({}).limit(sampleSize).toArray();
     }
 
     // Get indexes for the collection
+    await sendProgress?.(2, 4, "Getting indexes");
+    signal?.throwIfAborted();
     const indexes = await collection.indexes();
 
     // Infer schema from samples
     const inferredSchema = inferSchemaFromSamples(sampleDocuments);
 
     // Get document count with timeout protection
+    await sendProgress?.(3, 4, "Counting documents");
     let documentCount: number | string | null = null;
     try {
       // Set a timeout for the count operation
+      signal?.throwIfAborted();
       documentCount = await Promise.race([
         collection.countDocuments(),
         new Promise<never>((_, reject) =>
@@ -247,12 +260,15 @@ export async function handleReadResourceRequest({
       );
       // Estimate count based on sample size and collection stats
       try {
+        signal?.throwIfAborted();
         const stats = await db.command({ collStats: collectionName });
         documentCount = stats.count;
       } catch {
         documentCount = "unknown (count operation timed out)";
       }
     }
+
+    await sendProgress?.(4, 4, "Done");
 
     const schema: CollectionSchema = {
       type: "collection",
@@ -293,22 +309,31 @@ export async function handleListResourcesRequest({
   client,
   db,
   isReadOnlyMode,
+  signal,
 }: {
   request: ListResourcesRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  signal?: AbortSignal;
 }) {
   try {
+    signal?.throwIfAborted();
     const collections = await db.listCollections().toArray();
 
+    const allResources = collections.map((collection: CollectionInfo) => ({
+      uri: `mongodb:///${collection.name}`,
+      mimeType: "application/json",
+      name: collection.name,
+      description: `MongoDB collection: ${collection.name}`,
+    }));
+
+    const cursor = request.params?.cursor;
+    const { items, nextCursor } = paginate(allResources, cursor);
+
     return {
-      resources: collections.map((collection: CollectionInfo) => ({
-        uri: `mongodb:///${collection.name}`,
-        mimeType: "application/json",
-        name: collection.name,
-        description: `MongoDB collection: ${collection.name}`,
-      })),
+      resources: items,
+      ...(nextCursor ? { nextCursor } : {}),
     };
   } catch (error) {
     if (error instanceof Error) {

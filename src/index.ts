@@ -1,6 +1,6 @@
+import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import type { MongoClient } from "mongodb";
 import { connectToMongoDB } from "./mongo.js";
 import { createServer } from "./server.js";
@@ -18,6 +18,10 @@ async function main() {
   let readOnlyMode = process.env.MCP_MONGODB_READONLY === "true" || false;
   let transportMode: "stdio" | "http" = "stdio";
   let port = Number(process.env.MCP_PORT) || 3001;
+  const allowedOrigins = (process.env.MCP_HTTP_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
   // Parse command line arguments (these take precedence)
   for (let i = 0; i < args.length; i++) {
@@ -36,6 +40,13 @@ async function main() {
         console.error("Invalid port number.");
         process.exit(1);
       }
+    } else if (args[i] === "--allowed-origins") {
+      allowedOrigins.push(
+        ...(args[++i] || "")
+          .split(",")
+          .map((origin) => origin.trim())
+          .filter(Boolean),
+      );
     } else if (!connectionUrl) {
       connectionUrl = args[i];
     }
@@ -85,7 +96,7 @@ async function main() {
     }
 
     if (transportMode === "http") {
-      await startHttpServer(client, db, isReadOnlyMode, port);
+      await startHttpServer(client, db, isReadOnlyMode, port, allowedOrigins);
     } else {
       await startStdioServer(client, db, isReadOnlyMode);
     }
@@ -113,6 +124,38 @@ async function startStdioServer(
 }
 
 /**
+ * Check whether a request Origin is acceptable. Requests without an Origin
+ * header (non-browser clients like CLIs and IDEs) are always allowed;
+ * browser requests are only allowed from localhost origins or an explicit
+ * allowlist. This protects against DNS rebinding attacks, where a malicious
+ * website tricks a browser into sending requests to a locally running server.
+ */
+function isOriginAllowed(
+  origin: string | undefined,
+  allowedOrigins: string[],
+): boolean {
+  if (!origin) {
+    return true;
+  }
+
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+
+  try {
+    const { hostname } = new URL(origin);
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "[::1]"
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Start the server with Streamable HTTP transport.
  */
 async function startHttpServer(
@@ -120,6 +163,7 @@ async function startHttpServer(
   db: import("mongodb").Db,
   isReadOnlyMode: boolean,
   port: number,
+  allowedOrigins: string[],
 ) {
   const app = createMcpExpressApp({ host: "0.0.0.0" });
 
@@ -142,6 +186,24 @@ async function startHttpServer(
       );
     });
 
+    next();
+  });
+
+  // Origin validation: reject invalid origins with 403 Forbidden as required
+  // by the Streamable HTTP transport spec (DNS rebinding protection)
+  app.use((req, res, next) => {
+    const origin = req.headers.origin as string | undefined;
+    if (!isOriginAllowed(origin, allowedOrigins)) {
+      res.status(403).json({
+        jsonrpc: "2.0",
+        error: {
+          code: -32603,
+          message: "Forbidden: origin not allowed",
+        },
+        id: null,
+      });
+      return;
+    }
     next();
   });
 
