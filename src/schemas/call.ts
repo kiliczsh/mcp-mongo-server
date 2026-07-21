@@ -694,37 +694,32 @@ async function handleServerInfo(
     signal?.throwIfAborted();
     const buildInfo = await db.command({ buildInfo: 1 });
 
-    // Get additional server status if debug info is requested
-    let serverStatus = null;
-    if (includeDebugInfo) {
-      signal?.throwIfAborted();
-      serverStatus = await db.command({ serverStatus: 1 });
-    }
-
-    // Construct the response
-    const serverInfo = {
+    // Lean response by default; verbose build/runtime details (compiler
+    // flags, server status) are large and only returned on explicit request
+    const serverInfo: Record<string, unknown> = {
       version: buildInfo.version,
       gitVersion: buildInfo.gitVersion,
-      modules: buildInfo.modules,
-      allocator: buildInfo.allocator,
-      javascriptEngine: buildInfo.javascriptEngine,
-      sysInfo: buildInfo.sysInfo,
       storageEngines: buildInfo.storageEngines,
-      debug: buildInfo.debug,
       maxBsonObjectSize: buildInfo.maxBsonObjectSize,
-      openssl: buildInfo.openssl,
-      buildEnvironment: buildInfo.buildEnvironment,
       bits: buildInfo.bits,
       ok: buildInfo.ok,
-      status: {},
       connectionInfo: {
         readOnlyMode: isReadOnlyMode,
         readPreference: isReadOnlyMode ? "secondary" : "primary",
       },
     };
 
-    // Add server status information if requested
-    if (serverStatus) {
+    if (includeDebugInfo) {
+      signal?.throwIfAborted();
+      const serverStatus = await db.command({ serverStatus: 1 });
+
+      serverInfo.modules = buildInfo.modules;
+      serverInfo.allocator = buildInfo.allocator;
+      serverInfo.javascriptEngine = buildInfo.javascriptEngine;
+      serverInfo.sysInfo = buildInfo.sysInfo;
+      serverInfo.debug = buildInfo.debug;
+      serverInfo.openssl = buildInfo.openssl;
+      serverInfo.buildEnvironment = buildInfo.buildEnvironment;
       serverInfo.status = {
         host: serverStatus.host,
         version: serverStatus.version,
