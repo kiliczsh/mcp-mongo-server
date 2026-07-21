@@ -73,7 +73,7 @@ export function createServer(
     {
       name: "mongodb",
       title: "MongoDB MCP Server",
-      version: "2.0.2",
+      version: "2.1.0",
       description:
         "MCP server for MongoDB: query, aggregate, and manage collections with read-only mode, progress notifications, cancellation, and task support",
       websiteUrl: "https://github.com/kiliczsh/mcp-mongo-server",
