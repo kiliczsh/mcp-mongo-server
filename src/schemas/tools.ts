@@ -18,8 +18,12 @@ export async function handleListToolsRequest({
     tools: [
       {
         name: "query",
-        description:
-          "Execute a MongoDB query with optional execution plan analysis",
+        description: `Execute a MongoDB find query to retrieve documents from a collection, with optional execution plan analysis.
+
+Use when the user wants to read, search, or filter documents in a specific collection.
+Do not use when you need to perform multi-stage data transformations (use aggregate instead) or when you want to modify data (use update or insert instead).
+Accepts 'collection' (required), 'filter' (optional query object), 'projection' (optional field selection), 'limit' (optional, default 10), 'explain' (optional, for query plan analysis), and 'objectIdMode' (optional, default 'auto').
+Raises an error if the collection does not exist or the filter syntax is invalid.`,
         execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
@@ -65,8 +69,12 @@ export async function handleListToolsRequest({
       },
       {
         name: "aggregate",
-        description:
-          "Execute a MongoDB aggregation pipeline with optional execution plan analysis",
+        description: `Execute a MongoDB aggregation pipeline to perform multi-stage data transformations, grouping, joins, or analytics.
+
+Use when the user needs $group, $lookup, $unwind, $match chains, or any computation that goes beyond simple filtering.
+Do not use when a simple find query with filter and projection is sufficient (use query instead).
+Accepts 'collection' (required), 'pipeline' (required, array of stage objects), 'explain' (optional, for execution plan analysis), and 'objectIdMode' (optional, default 'auto').
+Raises an error if the pipeline syntax is invalid or a stage operator is unrecognized.`,
         execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
@@ -101,7 +109,12 @@ export async function handleListToolsRequest({
       },
       {
         name: "update",
-        description: "Update documents in a MongoDB collection",
+        description: `Update one or more documents in a MongoDB collection using update operators ($set, $unset, $inc, etc.).
+
+Use when the user wants to modify existing documents — change field values, increment counters, or remove fields.
+Do not use when you need to add new documents (use insert instead) or when you need to read data (use query instead).
+Accepts 'collection' (required), 'filter' (required), 'update' (required, update operators), 'upsert' (optional), 'multi' (optional, for updating multiple documents), and 'objectIdMode' (optional, default 'auto').
+Raises an error if the filter or update syntax is invalid.`,
         execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
@@ -141,8 +154,12 @@ export async function handleListToolsRequest({
       },
       {
         name: "serverInfo",
-        description:
-          "Get MongoDB server information including version, storage engine, and other details",
+        description: `Retrieve MongoDB server metadata including version, storage engine, host, and uptime.
+
+Use when the user wants to check the database server version, verify the storage engine, or diagnose server-level configuration.
+Do not use when you need to list collections (use listCollections instead) or query data (use query instead).
+Accepts 'includeDebugInfo' (optional boolean, includes additional diagnostic details).
+Raises an error if the server is unreachable.`,
         execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
@@ -157,7 +174,12 @@ export async function handleListToolsRequest({
       },
       {
         name: "insert",
-        description: "Insert one or more documents into a MongoDB collection",
+        description: `Insert one or more new documents into a MongoDB collection.
+
+Use when the user wants to add new records, seed data, or create documents in a collection.
+Do not use when you need to modify existing documents (use update instead) or when you need to read data (use query instead).
+Accepts 'collection' (required), 'documents' (required, array of document objects), 'ordered' (optional), 'writeConcern' (optional), 'bypassDocumentValidation' (optional), and 'objectIdMode' (optional, default 'auto').
+Raises an error if the collection name is invalid or document validation fails.`,
         execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
@@ -196,7 +218,12 @@ export async function handleListToolsRequest({
       },
       {
         name: "createIndex",
-        description: "Create one or more indexes on a MongoDB collection",
+        description: `Create one or more indexes on a MongoDB collection to improve query performance.
+
+Use when the user wants to add indexes for frequently queried fields, enforce uniqueness, or set up TTL expiration on documents.
+Do not use when you need to query or modify data (use query, update, or insert instead).
+Accepts 'collection' (required), 'indexes' (required, array of index specs), 'writeConcern' (optional), 'commitQuorum' (optional), and 'objectIdMode' (optional, default 'auto'). Each index spec requires a 'key' and supports options like 'name', 'unique', 'sparse', 'background', 'expireAfterSeconds', and 'partialFilterExpression'.
+Raises an error if the index key pattern is invalid or the collection does not exist.`,
         execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
@@ -263,7 +290,12 @@ export async function handleListToolsRequest({
       },
       {
         name: "count",
-        description: "Count documents in a collection matching a query",
+        description: `Count the number of documents in a collection that match a query filter.
+
+Use when the user wants to know how many documents exist, check if data is present, or get collection statistics.
+Do not use when you need to retrieve the actual documents (use query instead) or perform aggregation counts with grouping (use aggregate instead).
+Accepts 'collection' (required), 'query' (optional filter), 'limit' (optional max count), 'skip' (optional docs to skip), 'hint' (optional), 'readConcern' (optional), 'maxTimeMS' (optional), 'collation' (optional), and 'objectIdMode' (optional, default 'auto').
+Raises an error if the collection does not exist or the query filter is invalid.`,
         execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
@@ -294,7 +326,12 @@ export async function handleListToolsRequest({
       },
       {
         name: "listCollections",
-        description: "List all collections in the MongoDB database",
+        description: `List all collections in the connected MongoDB database.
+
+Use when the user wants to explore available collections before querying, or to verify a collection exists.
+Do not use when you already know the collection name and need to query its documents (use query instead).
+Accepts 'nameOnly' (optional boolean, returns only collection names for a compact listing), 'filter' (optional, to filter collections by properties), and 'objectIdMode' (optional, default 'auto').
+Raises an error if the database connection is unavailable.`,
         execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
