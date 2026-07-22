@@ -206,7 +206,7 @@ function bearerTokenValid(
   expected: string,
 ): boolean {
   const prefix = "Bearer ";
-  if (!authorization || !authorization.startsWith(prefix)) {
+  if (!authorization?.startsWith(prefix)) {
     return false;
   }
   const provided = Buffer.from(authorization.slice(prefix.length));
