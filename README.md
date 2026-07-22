@@ -83,6 +83,7 @@ npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 --allowed-o
 | `--port`, `-p` | HTTP port (default `3001`) |
 | `--allowed-origins` | Comma-separated browser origins to allow in HTTP mode |
 | `--json-limit` | Max HTTP request body size (default `10mb`) |
+| `--auth-token` | Require `Authorization: Bearer <token>` on the HTTP endpoint |
 
 ### Environment Variables
 
@@ -95,6 +96,7 @@ npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 --allowed-o
 | `MCP_PORT` | HTTP port |
 | `MCP_HTTP_ALLOWED_ORIGINS` | Comma-separated browser origins to allow in HTTP mode |
 | `MCP_HTTP_JSON_LIMIT` | Max HTTP request body size (default `10mb`) |
+| `MCP_HTTP_AUTH_TOKEN` | Bearer token required to access the HTTP endpoint |
 
 ## Security
 

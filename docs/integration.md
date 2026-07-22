@@ -51,6 +51,36 @@ HTTP request bodies are limited to `10mb` by default (matching the stdio
 transport). Raise or lower it with `--json-limit` (for example
 `--json-limit 50mb`) or the `MCP_HTTP_JSON_LIMIT` environment variable.
 
+### Requiring a token
+
+To require authentication, start the server with a bearer token:
+
+```bash
+MCP_HTTP_AUTH_TOKEN="your-secret-token" \
+  npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001
+```
+
+Every request must then send `Authorization: Bearer your-secret-token`;
+anything else gets a `401`. Point a client at it by adding the header to the
+server entry:
+
+```jsonc
+{
+  "mcpServers": {
+    "mongodb": {
+      "type": "http",
+      "url": "http://localhost:3001/mcp",
+      "headers": { "Authorization": "Bearer your-secret-token" }
+    }
+  }
+}
+```
+
+Prefer the `MCP_HTTP_AUTH_TOKEN` environment variable over `--auth-token` so
+the token doesn't show up in the process list. This is a simple shared-secret
+check, not a full OAuth flow — for anything beyond a single trusted client,
+put the server behind a real authenticating proxy.
+
 ## Docker
 
 - [docker-compose example](../examples/docker-compose.yml)

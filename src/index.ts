@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
@@ -29,6 +30,9 @@ async function main() {
   // Max HTTP request body size. Defaults to 10mb to match the stdio transport's
   // buffer, instead of Express's surprisingly low 100kb default.
   let jsonLimit = process.env.MCP_HTTP_JSON_LIMIT || "10mb";
+  // Optional static bearer token for the HTTP transport. When set, every
+  // request must carry `Authorization: Bearer <token>`. Empty = no auth.
+  let authToken = process.env.MCP_HTTP_AUTH_TOKEN || "";
 
   // Parse command line arguments (these take precedence)
   for (let i = 0; i < args.length; i++) {
@@ -61,6 +65,9 @@ async function main() {
     } else if (args[i] === "--json-limit") {
       const value = args[++i];
       if (value) jsonLimit = value;
+    } else if (args[i] === "--auth-token") {
+      const value = args[++i];
+      if (value) authToken = value;
     } else if (!connectionUrl) {
       connectionUrl = args[i];
     }
@@ -119,6 +126,7 @@ async function main() {
         port,
         allowedOrigins,
         jsonLimit,
+        authToken,
       );
     } else {
       await startStdioServer(
@@ -190,6 +198,25 @@ function isOriginAllowed(
 }
 
 /**
+ * Validate an `Authorization: Bearer <token>` header against the expected
+ * token using a constant-time comparison to avoid leaking it via timing.
+ */
+function bearerTokenValid(
+  authorization: string | undefined,
+  expected: string,
+): boolean {
+  const prefix = "Bearer ";
+  if (!authorization || !authorization.startsWith(prefix)) {
+    return false;
+  }
+  const provided = Buffer.from(authorization.slice(prefix.length));
+  const wanted = Buffer.from(expected);
+  return (
+    provided.length === wanted.length && timingSafeEqual(provided, wanted)
+  );
+}
+
+/**
  * Start the server with Streamable HTTP transport.
  */
 async function startHttpServer(
@@ -201,6 +228,7 @@ async function startHttpServer(
   port: number,
   allowedOrigins: string[],
   jsonLimit: string,
+  authToken: string,
 ) {
   const app = createMcpExpressApp({ host: "0.0.0.0", jsonLimit });
 
@@ -243,6 +271,29 @@ async function startHttpServer(
     }
     next();
   });
+
+  // Optional bearer-token auth: when a token is configured, every request must
+  // present it. Invalid or missing tokens get a 401 with a Bearer challenge, as
+  // required by the MCP authorization spec (RFC 6750 / OAuth 2.1 Section 5.3).
+  if (authToken) {
+    app.use((req, res, next) => {
+      if (!bearerTokenValid(req.headers.authorization, authToken)) {
+        res
+          .status(401)
+          .set("WWW-Authenticate", 'Bearer realm="mcp", error="invalid_token"')
+          .json({
+            jsonrpc: "2.0",
+            error: {
+              code: -32001,
+              message: "Unauthorized: missing or invalid bearer token",
+            },
+            id: null,
+          });
+        return;
+      }
+      next();
+    });
+  }
 
   // Modern stateless MCP handler: one factory serves both the 2026-07-28 and
   // legacy (2025-era) protocols per request. toNodeHandler adapts the
