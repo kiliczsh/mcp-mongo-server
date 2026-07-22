@@ -77,9 +77,11 @@ npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 --allowed-o
 | Flag | Description |
 |------|-------------|
 | `--read-only`, `-r` | Block all write operations |
+| `--allow-cross-db` | Allow aggregation `$out`/`$merge`/`$lookup` to target other databases (off by default) |
 | `--transport`, `-t` | `stdio` (default) or `http` |
 | `--port`, `-p` | HTTP port (default `3001`) |
 | `--allowed-origins` | Comma-separated browser origins to allow in HTTP mode |
+| `--json-limit` | Max HTTP request body size (default `10mb`) |
 
 ### Environment Variables
 
@@ -87,15 +89,28 @@ npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 --allowed-o
 |----------|-------------|
 | `MCP_MONGODB_URI` | MongoDB connection URI (alternative to the argument) |
 | `MCP_MONGODB_READONLY` | Enable read-only mode (`"true"`) |
+| `MCP_MONGODB_ALLOW_CROSS_DB` | Allow cross-database aggregation stages (`"true"`) |
 | `MCP_PORT` | HTTP port |
 | `MCP_HTTP_ALLOWED_ORIGINS` | Comma-separated browser origins to allow in HTTP mode |
+| `MCP_HTTP_JSON_LIMIT` | Max HTTP request body size (default `10mb`) |
 
 ## Security
 
-Read-only mode is enforced inside the server, which is enough for most setups.
-For a hard guarantee that nothing can ever write — regardless of the tool —
-connect with a MongoDB user that only has read permissions. That way the
-database itself rejects any write, as defense in depth.
+**Database scope.** The server operates on the database in your connection
+string. Aggregation stages that reach another database (`$out`, `$merge`,
+`$lookup` with an explicit `db`) are rejected by default, so a pipeline can't
+quietly read from or write to databases you didn't point it at. Enable them
+with `--allow-cross-db` if you need them.
+
+**Read-only mode** blocks every write path, including aggregation stages that
+write or run server-side JavaScript (`$out`, `$merge`, `$function`, `$where`,
+`$accumulator`).
+
+**Least privilege.** Application-level checks only go so far — the strongest
+guarantee comes from the database. Connect with a MongoDB user scoped to just
+the database you need, with read-only permissions when the assistant only needs
+to explore. That way the database itself enforces the boundary, as defense in
+depth.
 
 ## Documentation
 

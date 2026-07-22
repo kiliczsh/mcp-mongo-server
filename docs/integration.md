@@ -47,6 +47,10 @@ npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 \
 The same value can be set with the `MCP_HTTP_ALLOWED_ORIGINS` environment
 variable (comma-separated for multiple origins).
 
+HTTP request bodies are limited to `10mb` by default (matching the stdio
+transport). Raise or lower it with `--json-limit` (for example
+`--json-limit 50mb`) or the `MCP_HTTP_JSON_LIMIT` environment variable.
+
 ## Docker
 
 - [docker-compose example](../examples/docker-compose.yml)
