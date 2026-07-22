@@ -23,6 +23,9 @@ async function main() {
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
+  // Max HTTP request body size. Defaults to 10mb to match the stdio transport's
+  // buffer, instead of Express's surprisingly low 100kb default.
+  let jsonLimit = process.env.MCP_HTTP_JSON_LIMIT || "10mb";
 
   // Parse command line arguments (these take precedence)
   for (let i = 0; i < args.length; i++) {
@@ -48,6 +51,9 @@ async function main() {
           .map((origin) => origin.trim())
           .filter(Boolean),
       );
+    } else if (args[i] === "--json-limit") {
+      const value = args[++i];
+      if (value) jsonLimit = value;
     } else if (!connectionUrl) {
       connectionUrl = args[i];
     }
@@ -97,7 +103,14 @@ async function main() {
     }
 
     if (transportMode === "http") {
-      await startHttpServer(client, db, isReadOnlyMode, port, allowedOrigins);
+      await startHttpServer(
+        client,
+        db,
+        isReadOnlyMode,
+        port,
+        allowedOrigins,
+        jsonLimit,
+      );
     } else {
       await startStdioServer(client, db, isReadOnlyMode);
     }
@@ -166,8 +179,9 @@ async function startHttpServer(
   isReadOnlyMode: boolean,
   port: number,
   allowedOrigins: string[],
+  jsonLimit: string,
 ) {
-  const app = createMcpExpressApp({ host: "0.0.0.0" });
+  const app = createMcpExpressApp({ host: "0.0.0.0", jsonLimit });
 
   // Request logging middleware
   app.use((req, res, next) => {
@@ -220,6 +234,34 @@ async function startHttpServer(
   });
 
   app.all("/mcp", (req, res) => nodeHandler(req, res, req.body));
+
+  // Turn body-parser failures (payload too large, malformed JSON) into
+  // JSON-RPC errors instead of Express's default HTML error page.
+  app.use(
+    (
+      err: { type?: string; status?: number; statusCode?: number; message?: string },
+      _req: unknown,
+      res: {
+        headersSent: boolean;
+        status: (code: number) => { json: (body: unknown) => void };
+      },
+      next: (err?: unknown) => void,
+    ) => {
+      if (res.headersSent) return next(err);
+      const status = err.status ?? err.statusCode ?? 400;
+      const tooLarge = err.type === "entity.too.large" || status === 413;
+      res.status(tooLarge ? 413 : 400).json({
+        jsonrpc: "2.0",
+        error: {
+          code: tooLarge ? -32600 : -32700,
+          message: tooLarge
+            ? "Request body exceeds the configured size limit"
+            : `Invalid request body: ${err.message ?? "parse error"}`,
+        },
+        id: null,
+      });
+    },
+  );
 
   app.listen(port, () => {
     console.log(`MCP MongoDB Streamable HTTP Server listening on port ${port}`);

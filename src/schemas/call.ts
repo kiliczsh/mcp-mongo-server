@@ -60,6 +60,12 @@ const COLLECTION_OPERATIONS = [
 // Define write operations that are blocked in read-only mode
 const WRITE_OPERATIONS = ["update", "insert", "createIndex"];
 
+// Maximum object nesting depth we will walk when converting ObjectId/date
+// strings. Matches MongoDB's own BSON nesting limit, so we reject the same
+// inputs it would — but with a clear error and without risking a stack
+// overflow on pathologically deep input.
+const MAX_OBJECT_DEPTH = 100;
+
 // Aggregation stages/operators that must never run in read-only mode:
 // write stages ($out, $merge) can create or replace collections, and
 // server-side JavaScript operators ($function, $accumulator, $where) allow
@@ -321,7 +327,14 @@ function isObjectIdField(fieldName: string): boolean {
 function processObjectIdInFilter(
   filter: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  depth = 0,
 ): Filter<Document> {
+  if (depth > MAX_OBJECT_DEPTH) {
+    throw new Error(
+      `Object nesting exceeds the maximum depth of ${MAX_OBJECT_DEPTH}`,
+    );
+  }
+
   // If objectIdMode is "none", don't convert any strings to ObjectIds
   if (objectIdMode === "none") {
     // Create a new filter object to handle dates
@@ -364,6 +377,7 @@ function processObjectIdInFilter(
           result[key] = processObjectIdInFilter(
             value as Record<string, unknown>,
             "none",
+            depth + 1,
           );
         }
       } else {
@@ -431,6 +445,7 @@ function processObjectIdInFilter(
         result[key] = processObjectIdInFilter(
           value as Record<string, unknown>,
           objectIdMode,
+          depth + 1,
         );
       }
     } else {
