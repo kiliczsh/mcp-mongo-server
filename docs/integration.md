@@ -21,6 +21,66 @@ Add the server configuration to Claude Desktop's config file:
 
 You can also use the environment variables approach with both Windsurf and Cursor, following the same pattern shown in the Claude Desktop configuration.
 
+## Remote access (HTTP)
+
+The examples above run the server locally over stdio. To reach it over the
+network instead — for a remote client or several clients at once — start it in
+HTTP mode:
+
+```bash
+npx -y mcp-mongo-server "mongodb://user:pass@localhost:27017/mydatabase" \
+  --transport http --port 3001
+```
+
+The server then listens for MCP requests at `http://<host>:3001/mcp`.
+
+For safety, browser requests are only accepted from `localhost` by default;
+any other browser `Origin` is rejected with `403` (DNS-rebinding protection).
+Non-browser clients (which send no `Origin` header) are always allowed. To let
+a specific web origin connect, list it explicitly:
+
+```bash
+npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 \
+  --allowed-origins "https://app.example.com"
+```
+
+The same value can be set with the `MCP_HTTP_ALLOWED_ORIGINS` environment
+variable (comma-separated for multiple origins).
+
+HTTP request bodies are limited to `10mb` by default (matching the stdio
+transport). Raise or lower it with `--json-limit` (for example
+`--json-limit 50mb`) or the `MCP_HTTP_JSON_LIMIT` environment variable.
+
+### Requiring a token
+
+To require authentication, start the server with a bearer token:
+
+```bash
+MCP_HTTP_AUTH_TOKEN="your-secret-token" \
+  npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001
+```
+
+Every request must then send `Authorization: Bearer your-secret-token`;
+anything else gets a `401`. Point a client at it by adding the header to the
+server entry:
+
+```jsonc
+{
+  "mcpServers": {
+    "mongodb": {
+      "type": "http",
+      "url": "http://localhost:3001/mcp",
+      "headers": { "Authorization": "Bearer your-secret-token" }
+    }
+  }
+}
+```
+
+Prefer the `MCP_HTTP_AUTH_TOKEN` environment variable over `--auth-token` so
+the token doesn't show up in the process list. This is a simple shared-secret
+check, not a full OAuth flow — for anything beyond a single trusted client,
+put the server behind a real authenticating proxy.
+
 ## Docker
 
 - [docker-compose example](../examples/docker-compose.yml)

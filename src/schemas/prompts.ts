@@ -1,7 +1,8 @@
 import type {
   GetPromptRequest,
+  GetPromptResult,
   ListPromptsRequest,
-} from "@modelcontextprotocol/sdk/types.js";
+} from "@modelcontextprotocol/server";
 import type { Db, MongoClient } from "mongodb";
 import type { SendProgressFn } from "../server.js";
 
@@ -49,7 +50,7 @@ export async function handleGetPromptRequest({
   isReadOnlyMode: boolean;
   signal?: AbortSignal;
   sendProgress?: SendProgressFn;
-}) {
+}): Promise<GetPromptResult> {
   const { name, arguments: args = {} } = request.params;
 
   if (name !== "analyze_collection") {
