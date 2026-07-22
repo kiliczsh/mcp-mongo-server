@@ -5,51 +5,105 @@
 ![NPM Downloads](https://img.shields.io/npm/dm/mcp-mongo-server)
 ![NPM License](https://img.shields.io/npm/l/mcp-mongo-server)
 
-A Model Context Protocol server that enables LLMs to interact with MongoDB databases. This server provides capabilities for inspecting collection schemas and executing MongoDB operations through a standardized interface.
+A Model Context Protocol (MCP) server that lets AI assistants work with your MongoDB databases. It exposes your collections, infers their schemas, and runs queries, aggregations, and writes through a standard interface — so tools like Claude Desktop and Cursor can read and reason about your data.
 
 ## Demo
 
 [![MCP MongoDB Server Demo | Claude Desktop](https://img.youtube.com/vi/FI-oE_voCpA/0.jpg)](https://www.youtube.com/watch?v=FI-oE_voCpA)
 
+## Why use it
+
+- **Talk to your database in plain language** — the assistant discovers your collections and their shape automatically.
+- **Safe by default** — turn on read-only mode to let an assistant explore without any risk of changing data.
+- **Works everywhere** — connects to standalone, replica set, sharded, and Atlas deployments, over plain or TLS connections.
+
 ## Key Features
 
-- **Smart ObjectId Handling** - Configurable auto/none/force modes for string-to-ObjectId conversion
-- **Read-Only Mode** - Protection against write operations, uses secondary read preference
-- **Schema Inference** - Automatic collection schema detection from document samples
-- **Query & Aggregation** - Full MongoDB query and aggregation pipeline support with optional explain plans
-- **Write Operations** - Insert, update, and index creation (when not in read-only mode)
-- **Collection Completions** - Auto-complete collection names for LLM integration
+- **Read-Only Mode** — blocks every write path (insert, update, index creation, and aggregation stages like `$out`/`$merge` that could modify data).
+- **Smart ObjectId Handling** — configurable `auto`/`none`/`force` conversion of 24-character hex strings to ObjectIds.
+- **Schema Inference** — automatic collection schema detection from document samples.
+- **Query & Aggregation** — full query and aggregation pipeline support, with optional `explain` plans.
+- **Write Operations** — insert, update, and index creation (when read-only mode is off).
+- **Progress & Cancellation** — long operations report progress and can be cancelled mid-flight.
+- **Two Transports** — run locally over stdio, or expose an HTTP endpoint for remote access.
 
-## Installation
+## Requirements
+
+- Node.js 20 or newer
+
+## Quick Start
+
+Point the server at your database — no install step needed:
 
 ```bash
-npx -y mcp-mongo-server mongodb://localhost:27017/database
+npx -y mcp-mongo-server mongodb://localhost:27017/mydatabase
+```
+
+Explore safely, without any chance of changing data:
+
+```bash
+npx -y mcp-mongo-server mongodb://localhost:27017/mydatabase --read-only
 ```
 
 ## Usage
 
-```bash
-# Start server with MongoDB URI
-npx -y mcp-mongo-server mongodb://muhammed:kilic@localhost:27017/database
+### Local (stdio)
 
-# Connect in read-only mode
-npx -y mcp-mongo-server mongodb://muhammed:kilic@localhost:27017/database --read-only
+This is the default, used by Claude Desktop, Cursor, and other local clients:
+
+```bash
+npx -y mcp-mongo-server "mongodb://user:pass@localhost:27017/mydatabase"
 ```
+
+### Remote (HTTP)
+
+Expose an HTTP endpoint at `/mcp` for remote or multi-client access:
+
+```bash
+npx -y mcp-mongo-server "mongodb://user:pass@localhost:27017/mydatabase" --transport http --port 3001
+```
+
+By default, only requests without a browser `Origin` (CLIs, IDEs) and requests
+from `localhost` are accepted; everything else is rejected with `403` to guard
+against DNS-rebinding attacks. Allow specific browser origins with
+`--allowed-origins`:
+
+```bash
+npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 --allowed-origins "https://app.example.com"
+```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--read-only`, `-r` | Block all write operations |
+| `--transport`, `-t` | `stdio` (default) or `http` |
+| `--port`, `-p` | HTTP port (default `3001`) |
+| `--allowed-origins` | Comma-separated browser origins to allow in HTTP mode |
 
 ### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `MCP_MONGODB_URI` | MongoDB connection URI |
+| `MCP_MONGODB_URI` | MongoDB connection URI (alternative to the argument) |
 | `MCP_MONGODB_READONLY` | Enable read-only mode (`"true"`) |
+| `MCP_PORT` | HTTP port |
+| `MCP_HTTP_ALLOWED_ORIGINS` | Comma-separated browser origins to allow in HTTP mode |
+
+## Security
+
+Read-only mode is enforced inside the server, which is enough for most setups.
+For a hard guarantee that nothing can ever write — regardless of the tool —
+connect with a MongoDB user that only has read permissions. That way the
+database itself rejects any write, as defense in depth.
 
 ## Documentation
 
-- [Integration Guide](docs/integration.md) - Claude Desktop, Windsurf, Cursor, Docker
-- [Available Tools](docs/tools.md) - Query, aggregate, update, insert, and more
-- [Development](docs/development.md) - Setup, scripts, and debugging
+- [Integration Guide](docs/integration.md) — Claude Desktop, Windsurf, Cursor, Docker
+- [Available Tools](docs/tools.md) — query, aggregate, update, insert, and more
+- [Development](docs/development.md) — setup, scripts, and debugging
 - [Contributing](CONTRIBUTING.md)
 
 ## License
 
-MIT - see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE) for details.

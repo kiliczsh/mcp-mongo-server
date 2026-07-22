@@ -21,6 +21,32 @@ Add the server configuration to Claude Desktop's config file:
 
 You can also use the environment variables approach with both Windsurf and Cursor, following the same pattern shown in the Claude Desktop configuration.
 
+## Remote access (HTTP)
+
+The examples above run the server locally over stdio. To reach it over the
+network instead — for a remote client or several clients at once — start it in
+HTTP mode:
+
+```bash
+npx -y mcp-mongo-server "mongodb://user:pass@localhost:27017/mydatabase" \
+  --transport http --port 3001
+```
+
+The server then listens for MCP requests at `http://<host>:3001/mcp`.
+
+For safety, browser requests are only accepted from `localhost` by default;
+any other browser `Origin` is rejected with `403` (DNS-rebinding protection).
+Non-browser clients (which send no `Origin` header) are always allowed. To let
+a specific web origin connect, list it explicitly:
+
+```bash
+npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 \
+  --allowed-origins "https://app.example.com"
+```
+
+The same value can be set with the `MCP_HTTP_ALLOWED_ORIGINS` environment
+variable (comma-separated for multiple origins).
+
 ## Docker
 
 - [docker-compose example](../examples/docker-compose.yml)
