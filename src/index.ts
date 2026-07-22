@@ -1,6 +1,7 @@
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { toNodeHandler } from "@modelcontextprotocol/node";
+import { createMcpHandler } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { createMcpExpressApp } from "@modelcontextprotocol/express";
 import type { MongoClient } from "mongodb";
 import { connectToMongoDB } from "./mongo.js";
 import { createServer } from "./server.js";
@@ -117,9 +118,10 @@ async function startStdioServer(
   db: import("mongodb").Db,
   isReadOnlyMode: boolean,
 ) {
-  const server = createServer(client, db, isReadOnlyMode);
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  // serveStdio owns the era decision: a 2026-07-28 client opening is served the
+  // modern protocol, a 2025-era opening is served via the legacy shim — one
+  // factory, both eras.
+  serveStdio(() => createServer(client, db, isReadOnlyMode));
   console.warn("Server connected successfully via stdio");
 }
 
@@ -207,58 +209,17 @@ async function startHttpServer(
     next();
   });
 
-  app.post("/mcp", async (req, res) => {
-    const server = createServer(client, db, isReadOnlyMode);
-    try {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      });
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
-      res.on("close", () => {
-        transport.close();
-        server.close();
-      });
-    } catch (error) {
-      console.error("Error handling MCP request:", error);
-      if (!res.headersSent) {
-        res.status(500).json({
-          jsonrpc: "2.0",
-          error: {
-            code: -32603,
-            message: "Internal server error",
-          },
-          id: null,
-        });
-      }
-    }
+  // Modern stateless MCP handler: one factory serves both the 2026-07-28 and
+  // legacy (2025-era) protocols per request. toNodeHandler adapts the
+  // fetch-shaped handler to Express, forwarding the body express.json() parsed.
+  const mcpHandler = createMcpHandler((_ctx) =>
+    createServer(client, db, isReadOnlyMode),
+  );
+  const nodeHandler = toNodeHandler(mcpHandler, {
+    onerror: (error) => console.error("Error handling MCP request:", error),
   });
 
-  app.get("/mcp", async (_req, res) => {
-    res.writeHead(405).end(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        error: {
-          code: -32000,
-          message: "Method not allowed.",
-        },
-        id: null,
-      }),
-    );
-  });
-
-  app.delete("/mcp", async (_req, res) => {
-    res.writeHead(405).end(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        error: {
-          code: -32000,
-          message: "Method not allowed.",
-        },
-        id: null,
-      }),
-    );
-  });
+  app.all("/mcp", (req, res) => nodeHandler(req, res, req.body));
 
   app.listen(port, () => {
     console.log(`MCP MongoDB Streamable HTTP Server listening on port ${port}`);

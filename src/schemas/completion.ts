@@ -1,7 +1,4 @@
-import type {
-  CompleteRequest,
-  CompleteResult,
-} from "@modelcontextprotocol/sdk/types.js";
+import type { CompleteRequest, CompleteResult } from "@modelcontextprotocol/server";
 import type { CollectionInfo, Db, MongoClient } from "mongodb";
 import { paginate } from "../utils/pagination.js";
 

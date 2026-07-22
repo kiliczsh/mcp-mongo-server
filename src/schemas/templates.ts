@@ -1,4 +1,4 @@
-import type { ListResourceTemplatesRequest } from "@modelcontextprotocol/sdk/types.js";
+import type { ListResourceTemplatesRequest } from "@modelcontextprotocol/server";
 import type { Db, MongoClient } from "mongodb";
 
 export async function handleListResourceTemplatesRequest({

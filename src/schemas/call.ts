@@ -1,10 +1,8 @@
-import type { CreateTaskResult } from "@modelcontextprotocol/sdk/experimental/tasks";
-import type { RequestTaskStore } from "@modelcontextprotocol/sdk/shared/protocol.js";
-import {
-  type CallToolRequest,
-  ErrorCode,
-  McpError,
-} from "@modelcontextprotocol/sdk/types.js";
+import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
+import type {
+  CallToolRequest,
+  CallToolResult,
+} from "@modelcontextprotocol/server";
 import type {
   BulkWriteOptions,
   CollationOptions,
@@ -109,16 +107,12 @@ export async function handleCallToolRequest({
   db,
   isReadOnlyMode,
   signal,
-  taskStore,
-  taskTtl,
 }: {
   request: CallToolRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
   signal?: AbortSignal;
-  taskStore?: RequestTaskStore;
-  taskTtl?: number | null;
 }) {
   const { name, arguments: args = {} } = request.params;
   const operation = name as MongoOperation;
@@ -171,43 +165,6 @@ export async function handleCallToolRequest({
 
     signal?.throwIfAborted();
 
-    // Task-augmented request: create task, run async, return immediately
-    if (taskStore) {
-      const task = await taskStore.createTask({
-        ttl: taskTtl ?? undefined,
-      });
-
-      // Fire-and-forget: run the operation in the background
-      (async () => {
-        try {
-          const result = await executeOperation(
-            operation,
-            collection,
-            db,
-            isReadOnlyMode,
-            args,
-            objectIdMode,
-            signal,
-          );
-          await taskStore.storeTaskResult(task.taskId, "completed", result);
-        } catch (error) {
-          try {
-            const message =
-              error instanceof Error ? error.message : "Unknown error";
-            await taskStore.storeTaskResult(task.taskId, "failed", {
-              content: [{ type: "text", text: message }],
-              isError: true,
-            });
-          } catch {
-            // Task may already be in a terminal state (cancelled, completed, or failed)
-          }
-        }
-      })();
-
-      return { task } as CreateTaskResult;
-    }
-
-    // Synchronous execution path
     return await executeOperation(
       operation,
       collection,
@@ -219,7 +176,7 @@ export async function handleCallToolRequest({
     );
   } catch (error) {
     // Protocol-level errors and cancellation propagate unchanged
-    if (error instanceof McpError || signal?.aborted) {
+    if (error instanceof ProtocolError || signal?.aborted) {
       throw error;
     }
     return toolExecutionError(
@@ -261,7 +218,7 @@ async function executeOperation(
     case "listCollections":
       return handleListCollections(db, args, objectIdMode, signal);
     default:
-      throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${operation}`);
+      throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown tool: ${operation}`);
   }
 }
 
@@ -280,7 +237,7 @@ function validateOperation(operation: MongoOperation): void {
   ];
 
   if (!validOperations.includes(operation)) {
-    throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${operation}`);
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown tool: ${operation}`);
   }
 }
 
@@ -496,9 +453,7 @@ function isISODateString(str: string): boolean {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(str);
 }
 
-function formatResponse(data: unknown): {
-  content: [{ type: string; text: string }];
-} {
+function formatResponse(data: unknown): CallToolResult {
   return {
     content: [
       {
@@ -509,10 +464,7 @@ function formatResponse(data: unknown): {
   };
 }
 
-function toolExecutionError(message: string): {
-  content: [{ type: string; text: string }];
-  isError: true;
-} {
+function toolExecutionError(message: string): CallToolResult {
   return {
     content: [{ type: "text", text: message }],
     isError: true,
