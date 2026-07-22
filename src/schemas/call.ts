@@ -86,11 +86,23 @@ const READONLY_FORBIDDEN_AGG_OPERATORS = new Set([
 /**
  * Recursively scan an aggregation pipeline for any operator in `operators`
  * (matched case-sensitively as object keys). Returns the first match, or null.
+ * Guards against overly deep nesting so a pathological pipeline can't overflow
+ * the stack before the operator/depth checks run.
  */
-function findAggOperator(value: unknown, operators: Set<string>): string | null {
+function findAggOperator(
+  value: unknown,
+  operators: Set<string>,
+  depth = 0,
+): string | null {
+  if (depth > MAX_OBJECT_DEPTH) {
+    throw new Error(
+      `Object nesting exceeds the maximum depth of ${MAX_OBJECT_DEPTH}`,
+    );
+  }
+
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = findAggOperator(item, operators);
+      const found = findAggOperator(item, operators, depth + 1);
       if (found) return found;
     }
     return null;
@@ -101,7 +113,7 @@ function findAggOperator(value: unknown, operators: Set<string>): string | null 
       if (operators.has(key)) {
         return key;
       }
-      const found = findAggOperator(nested, operators);
+      const found = findAggOperator(nested, operators, depth + 1);
       if (found) return found;
     }
   }
