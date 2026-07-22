@@ -50,6 +50,11 @@ export async function handleListToolsRequest({
                 "Number of documents to skip before returning results",
               default: 0,
             },
+            sort: {
+              type: "object",
+              description:
+                "Sort order as a field-to-direction map, e.g. { orderDate: -1 } for descending or { name: 1 } for ascending",
+            },
             explain: {
               type: "string",
               description: "Optional: Get query execution information",
