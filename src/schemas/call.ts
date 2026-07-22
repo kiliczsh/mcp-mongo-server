@@ -45,7 +45,8 @@ type MongoOperation =
   | "insert"
   | "createIndex"
   | "count"
-  | "listCollections";
+  | "listCollections"
+  | "convertTime";
 
 // Define operations that require a collection
 const COLLECTION_OPERATIONS = [
@@ -288,6 +289,8 @@ async function executeOperation(
       return handleCount(collection, args, objectIdMode, signal);
     case "listCollections":
       return handleListCollections(db, args, objectIdMode, signal);
+    case "convertTime":
+      return handleConvertTime(args);
     default:
       throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown tool: ${operation}`);
   }
@@ -305,6 +308,7 @@ function validateOperation(operation: MongoOperation): void {
     "createIndex",
     "count",
     "listCollections",
+    "convertTime",
   ];
 
   if (!validOperations.includes(operation)) {
@@ -528,10 +532,14 @@ function isObjectIdString(str: string): boolean {
   return /^[0-9a-fA-F]{24}$/.test(str);
 }
 
-// Helper function to check if a string is in ISO date format
+// Helper function to check if a string is an unambiguous ISO 8601 timestamp.
+// Requires an explicit timezone — either 'Z' (UTC) or a numeric offset like
+// '+03:00' — so a value always maps to one instant regardless of the server's
+// timezone. Timezone-less strings are intentionally left as plain strings.
 function isISODateString(str: string): boolean {
-  // Check if string matches ISO 8601 format
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(str);
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.test(
+    str,
+  );
 }
 
 function formatResponse(data: unknown): CallToolResult {
@@ -1052,6 +1060,59 @@ async function handleCount(
   } catch (error) {
     return handleError(error, "count documents", collection.collectionName);
   }
+}
+
+function handleConvertTime(args: Record<string, unknown>): CallToolResult {
+  const { input } = args;
+  let date: Date;
+
+  if (input === undefined || input === null || input === "") {
+    // No input: report the current time.
+    date = new Date();
+  } else if (typeof input === "number") {
+    // Auto-detect seconds vs milliseconds: values below ~1e12 (year 2001 in
+    // milliseconds) are treated as seconds, everything else as milliseconds.
+    date = new Date(Math.abs(input) < 1e12 ? input * 1000 : input);
+  } else if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (/^-?\d+$/.test(trimmed)) {
+      const n = Number(trimmed);
+      date = new Date(Math.abs(n) < 1e12 ? n * 1000 : n);
+    } else {
+      // Any date string the JS engine understands (ISO 8601, with or without
+      // an offset, RFC 2822, etc.).
+      date = new Date(trimmed);
+    }
+  } else {
+    throw new Error(
+      "convertTime 'input' must be a Unix timestamp (number) or a date string",
+    );
+  }
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(
+      `Could not interpret '${String(input)}' as a date or Unix timestamp`,
+    );
+  }
+
+  // Server timezone offset (in ±HH:MM), respecting DST for the given date.
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absMinutes = Math.abs(offsetMinutes);
+  const offsetLabel = `${sign}${String(Math.floor(absMinutes / 60)).padStart(
+    2,
+    "0",
+  )}:${String(absMinutes % 60).padStart(2, "0")}`;
+
+  return formatResponse({
+    iso: date.toISOString(),
+    utc: date.toUTCString(),
+    unixSeconds: Math.floor(date.getTime() / 1000),
+    unixMillis: date.getTime(),
+    serverLocal: date.toString(),
+    serverTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    serverUtcOffset: offsetLabel,
+  });
 }
 
 async function handleListCollections(

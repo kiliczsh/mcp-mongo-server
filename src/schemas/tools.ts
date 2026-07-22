@@ -322,6 +322,21 @@ export async function handleListToolsRequest({
           },
         },
       },
+      {
+        name: "convertTime",
+        description:
+          "Convert a Unix timestamp or date string to multiple formats (UTC ISO 8601, GMT, Unix seconds/milliseconds) and report the server's current time and timezone. Useful for building unambiguous date queries when the server and user are in different timezones. Omit 'input' to get the current time.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            input: {
+              type: "string",
+              description:
+                "A Unix timestamp (seconds or milliseconds, as a number or numeric string) or a date string (ISO 8601, with or without a timezone offset). Omit to use the current server time.",
+            },
+          },
+        },
+      },
     ],
   };
 }

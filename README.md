@@ -24,6 +24,7 @@ A Model Context Protocol (MCP) server that lets AI assistants work with your Mon
 - **Schema Inference** — automatic collection schema detection from document samples.
 - **Query & Aggregation** — full query and aggregation pipeline support, with optional `explain` plans.
 - **Write Operations** — insert, update, and index creation (when read-only mode is off).
+- **Time Conversion** — a `convertTime` helper turns Unix timestamps and date strings into UTC/GMT/ISO, so date queries stay unambiguous across timezones.
 - **Progress & Cancellation** — long operations report progress and can be cancelled mid-flight.
 - **Two Transports** — run locally over stdio, or expose an HTTP endpoint for remote access.
 
