@@ -66,26 +66,31 @@ const WRITE_OPERATIONS = ["update", "insert", "createIndex"];
 // overflow on pathologically deep input.
 const MAX_OBJECT_DEPTH = 100;
 
-// Aggregation stages/operators that must never run in read-only mode:
-// write stages ($out, $merge) can create or replace collections, and
-// server-side JavaScript operators ($function, $accumulator, $where) allow
-// arbitrary code execution. All are matched case-sensitively as object keys.
-const READONLY_FORBIDDEN_AGG_OPERATORS = new Set([
-  "$out",
-  "$merge",
+// Aggregation write stages ($out, $merge) can create or replace collections.
+const WRITE_AGG_STAGES = new Set(["$out", "$merge"]);
+
+// Server-side JavaScript operators allow arbitrary code execution on the
+// MongoDB server (and are a denial-of-service vector via infinite loops).
+const SERVER_JS_AGG_OPERATORS = new Set([
   "$function",
   "$accumulator",
   "$where",
 ]);
 
+// Everything blocked in read-only mode: no writes and no server-side JS.
+const READONLY_FORBIDDEN_AGG_OPERATORS = new Set([
+  ...WRITE_AGG_STAGES,
+  ...SERVER_JS_AGG_OPERATORS,
+]);
+
 /**
- * Recursively scan an aggregation pipeline for operators that are forbidden in
- * read-only mode. Returns the first forbidden operator found, or null.
+ * Recursively scan an aggregation pipeline for any operator in `operators`
+ * (matched case-sensitively as object keys). Returns the first match, or null.
  */
-function findForbiddenAggOperator(value: unknown): string | null {
+function findAggOperator(value: unknown, operators: Set<string>): string | null {
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = findForbiddenAggOperator(item);
+      const found = findAggOperator(item, operators);
       if (found) return found;
     }
     return null;
@@ -93,10 +98,10 @@ function findForbiddenAggOperator(value: unknown): string | null {
 
   if (value && typeof value === "object") {
     for (const [key, nested] of Object.entries(value)) {
-      if (READONLY_FORBIDDEN_AGG_OPERATORS.has(key)) {
+      if (operators.has(key)) {
         return key;
       }
-      const found = findForbiddenAggOperator(nested);
+      const found = findAggOperator(nested, operators);
       if (found) return found;
     }
   }
@@ -151,6 +156,7 @@ export async function handleCallToolRequest({
   db,
   isReadOnlyMode,
   allowCrossDb = false,
+  allowServerJs = false,
   signal,
 }: {
   request: CallToolRequest;
@@ -158,6 +164,7 @@ export async function handleCallToolRequest({
   db: Db;
   isReadOnlyMode: boolean;
   allowCrossDb?: boolean;
+  allowServerJs?: boolean;
   signal?: AbortSignal;
 }) {
   const { name, arguments: args = {} } = request.params;
@@ -217,6 +224,7 @@ export async function handleCallToolRequest({
       db,
       isReadOnlyMode,
       allowCrossDb,
+      allowServerJs,
       args,
       objectIdMode,
       signal,
@@ -238,6 +246,7 @@ async function executeOperation(
   db: Db,
   isReadOnlyMode: boolean,
   allowCrossDb: boolean,
+  allowServerJs: boolean,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode,
   signal?: AbortSignal,
@@ -252,6 +261,7 @@ async function executeOperation(
         objectIdMode,
         isReadOnlyMode,
         allowCrossDb,
+        allowServerJs,
         signal,
       );
     case "update":
@@ -294,7 +304,8 @@ function validateCollection(collection: Collection<Document>): void {
   if (!collection.collectionName) {
     throw new Error("Collection name cannot be empty");
   }
-  if (collection.collectionName.startsWith("system.")) {
+  // Case-insensitive so 'System.' and other casings can't slip past the guard.
+  if (collection.collectionName.toLowerCase().startsWith("system.")) {
     throw new Error("Access to system collections is not allowed");
   }
 }
@@ -609,6 +620,7 @@ async function handleAggregate(
   objectIdMode: ObjectIdConversionMode = "auto",
   isReadOnlyMode = false,
   allowCrossDb = false,
+  allowServerJs = false,
   signal?: AbortSignal,
 ) {
   if (!collection) {
@@ -624,10 +636,25 @@ async function handleAggregate(
   // execute server-side JavaScript. Without this an aggregate ending in $out
   // or $merge would bypass read-only protection and overwrite collections.
   if (isReadOnlyMode) {
-    const forbidden = findForbiddenAggOperator(pipeline);
+    const forbidden = findAggOperator(
+      pipeline,
+      READONLY_FORBIDDEN_AGG_OPERATORS,
+    );
     if (forbidden) {
       throw new Error(
         `ReadonlyError: Aggregation operator '${forbidden}' is not allowed in read-only mode`,
+      );
+    }
+  }
+
+  // Server-side JavaScript ($function/$where/$accumulator) is arbitrary code
+  // execution on the MongoDB server; reject it by default even outside
+  // read-only mode, unless explicitly enabled.
+  if (!allowServerJs) {
+    const js = findAggOperator(pipeline, SERVER_JS_AGG_OPERATORS);
+    if (js) {
+      throw new Error(
+        `Server-side JavaScript operator '${js}' is not allowed. Enable it with --allow-server-js or MCP_MONGODB_ALLOW_SERVER_JS=true.`,
       );
     }
   }

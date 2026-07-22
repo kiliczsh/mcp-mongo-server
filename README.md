@@ -78,6 +78,7 @@ npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 --allowed-o
 |------|-------------|
 | `--read-only`, `-r` | Block all write operations |
 | `--allow-cross-db` | Allow aggregation `$out`/`$merge`/`$lookup` to target other databases (off by default) |
+| `--allow-server-js` | Allow server-side JavaScript operators `$function`/`$where`/`$accumulator` (off by default) |
 | `--transport`, `-t` | `stdio` (default) or `http` |
 | `--port`, `-p` | HTTP port (default `3001`) |
 | `--allowed-origins` | Comma-separated browser origins to allow in HTTP mode |
@@ -90,6 +91,7 @@ npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 --allowed-o
 | `MCP_MONGODB_URI` | MongoDB connection URI (alternative to the argument) |
 | `MCP_MONGODB_READONLY` | Enable read-only mode (`"true"`) |
 | `MCP_MONGODB_ALLOW_CROSS_DB` | Allow cross-database aggregation stages (`"true"`) |
+| `MCP_MONGODB_ALLOW_SERVER_JS` | Allow server-side JavaScript operators (`"true"`) |
 | `MCP_PORT` | HTTP port |
 | `MCP_HTTP_ALLOWED_ORIGINS` | Comma-separated browser origins to allow in HTTP mode |
 | `MCP_HTTP_JSON_LIMIT` | Max HTTP request body size (default `10mb`) |
@@ -101,6 +103,11 @@ string. Aggregation stages that reach another database (`$out`, `$merge`,
 `$lookup` with an explicit `db`) are rejected by default, so a pipeline can't
 quietly read from or write to databases you didn't point it at. Enable them
 with `--allow-cross-db` if you need them.
+
+**Server-side JavaScript.** The aggregation operators `$function`, `$where`,
+and `$accumulator` run arbitrary JavaScript on the MongoDB server. They are
+rejected by default; enable them with `--allow-server-js` if you trust the
+pipelines being run.
 
 **Read-only mode** blocks every write path, including aggregation stages that
 write or run server-side JavaScript (`$out`, `$merge`, `$function`, `$where`,

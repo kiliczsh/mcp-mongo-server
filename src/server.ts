@@ -45,6 +45,7 @@ export function createServer(
   db: Db,
   isReadOnlyMode = false,
   allowCrossDb = false,
+  allowServerJs = false,
   options = {},
 ) {
   const server = new Server(
@@ -134,6 +135,7 @@ export function createServer(
       db,
       isReadOnlyMode,
       allowCrossDb,
+      allowServerJs,
       signal: ctx.mcpReq.signal,
     }),
   );
