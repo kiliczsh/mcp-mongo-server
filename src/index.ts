@@ -17,6 +17,7 @@ async function main() {
   // Default to environment variables
   let connectionUrl = "";
   let readOnlyMode = process.env.MCP_MONGODB_READONLY === "true" || false;
+  let allowCrossDb = process.env.MCP_MONGODB_ALLOW_CROSS_DB === "true" || false;
   let transportMode: "stdio" | "http" = "stdio";
   let port = Number(process.env.MCP_PORT) || 3001;
   const allowedOrigins = (process.env.MCP_HTTP_ALLOWED_ORIGINS || "")
@@ -31,6 +32,8 @@ async function main() {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--read-only" || args[i] === "-r") {
       readOnlyMode = true;
+    } else if (args[i] === "--allow-cross-db") {
+      allowCrossDb = true;
     } else if (args[i] === "--transport" || args[i] === "-t") {
       const value = args[++i];
       if (value !== "stdio" && value !== "http") {
@@ -107,12 +110,13 @@ async function main() {
         client,
         db,
         isReadOnlyMode,
+        allowCrossDb,
         port,
         allowedOrigins,
         jsonLimit,
       );
     } else {
-      await startStdioServer(client, db, isReadOnlyMode);
+      await startStdioServer(client, db, isReadOnlyMode, allowCrossDb);
     }
   } catch (error) {
     console.error("Failed to connect to MongoDB:", error);
@@ -130,11 +134,12 @@ async function startStdioServer(
   client: MongoClient,
   db: import("mongodb").Db,
   isReadOnlyMode: boolean,
+  allowCrossDb: boolean,
 ) {
   // serveStdio owns the era decision: a 2026-07-28 client opening is served the
   // modern protocol, a 2025-era opening is served via the legacy shim — one
   // factory, both eras.
-  serveStdio(() => createServer(client, db, isReadOnlyMode));
+  serveStdio(() => createServer(client, db, isReadOnlyMode, allowCrossDb));
   console.warn("Server connected successfully via stdio");
 }
 
@@ -177,6 +182,7 @@ async function startHttpServer(
   client: MongoClient,
   db: import("mongodb").Db,
   isReadOnlyMode: boolean,
+  allowCrossDb: boolean,
   port: number,
   allowedOrigins: string[],
   jsonLimit: string,
@@ -227,7 +233,7 @@ async function startHttpServer(
   // legacy (2025-era) protocols per request. toNodeHandler adapts the
   // fetch-shaped handler to Express, forwarding the body express.json() parsed.
   const mcpHandler = createMcpHandler((_ctx) =>
-    createServer(client, db, isReadOnlyMode),
+    createServer(client, db, isReadOnlyMode, allowCrossDb),
   );
   const nodeHandler = toNodeHandler(mcpHandler, {
     onerror: (error) => console.error("Error handling MCP request:", error),

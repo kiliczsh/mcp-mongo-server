@@ -104,6 +104,44 @@ function findForbiddenAggOperator(value: unknown): string | null {
   return null;
 }
 
+/**
+ * Scan an aggregation pipeline for stages that read from or write to a database
+ * other than the connected one ($out, $merge, $lookup with an explicit `db`).
+ * Returns the first foreign database name found, or null. Used to keep the
+ * server scoped to its connected database unless cross-database access is
+ * explicitly enabled.
+ */
+function findCrossDbTarget(
+  pipeline: unknown[],
+  connectedDb: string,
+): string | null {
+  const foreignDb = (target: unknown): string | null => {
+    if (target && typeof target === "object" && "db" in target) {
+      const db = (target as { db?: unknown }).db;
+      if (typeof db === "string" && db && db !== connectedDb) return db;
+    }
+    return null;
+  };
+
+  for (const stage of pipeline) {
+    if (!stage || typeof stage !== "object") continue;
+    const s = stage as Record<string, unknown>;
+    // $out: "<db>.<coll>" is same-db; { db, coll } may target another db
+    const out = foreignDb(s.$out);
+    if (out) return out;
+    // $merge: { into: "<coll>" | { db, coll } }
+    const merge = s.$merge as { into?: unknown } | undefined;
+    const mergeInto = foreignDb(merge?.into ?? s.$merge);
+    if (mergeInto) return mergeInto;
+    // $lookup: { from: { db, coll } } (cross-db read)
+    const lookup = s.$lookup as { from?: unknown } | undefined;
+    const lookupFrom = foreignDb(lookup?.from);
+    if (lookupFrom) return lookupFrom;
+  }
+
+  return null;
+}
+
 // ObjectId conversion settings
 type ObjectIdConversionMode = "auto" | "none" | "force";
 
@@ -112,12 +150,14 @@ export async function handleCallToolRequest({
   client,
   db,
   isReadOnlyMode,
+  allowCrossDb = false,
   signal,
 }: {
   request: CallToolRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  allowCrossDb?: boolean;
   signal?: AbortSignal;
 }) {
   const { name, arguments: args = {} } = request.params;
@@ -176,6 +216,7 @@ export async function handleCallToolRequest({
       collection,
       db,
       isReadOnlyMode,
+      allowCrossDb,
       args,
       objectIdMode,
       signal,
@@ -196,6 +237,7 @@ async function executeOperation(
   collection: Collection<Document> | null,
   db: Db,
   isReadOnlyMode: boolean,
+  allowCrossDb: boolean,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode,
   signal?: AbortSignal,
@@ -209,6 +251,7 @@ async function executeOperation(
         args,
         objectIdMode,
         isReadOnlyMode,
+        allowCrossDb,
         signal,
       );
     case "update":
@@ -565,6 +608,7 @@ async function handleAggregate(
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
   isReadOnlyMode = false,
+  allowCrossDb = false,
   signal?: AbortSignal,
 ) {
   if (!collection) {
@@ -584,6 +628,17 @@ async function handleAggregate(
     if (forbidden) {
       throw new Error(
         `ReadonlyError: Aggregation operator '${forbidden}' is not allowed in read-only mode`,
+      );
+    }
+  }
+
+  // Keep the server scoped to its connected database: reject $out/$merge/$lookup
+  // that target another database, unless cross-database access is enabled.
+  if (!allowCrossDb) {
+    const foreignDb = findCrossDbTarget(pipeline, collection.dbName);
+    if (foreignDb) {
+      throw new Error(
+        `Cross-database access to '${foreignDb}' is not allowed (connected database is '${collection.dbName}'). Enable it with --allow-cross-db or MCP_MONGODB_ALLOW_CROSS_DB=true.`,
       );
     }
   }

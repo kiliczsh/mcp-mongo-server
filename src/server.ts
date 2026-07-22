@@ -44,6 +44,7 @@ export function createServer(
   client: MongoClient,
   db: Db,
   isReadOnlyMode = false,
+  allowCrossDb = false,
   options = {},
 ) {
   const server = new Server(
@@ -132,6 +133,7 @@ export function createServer(
       client,
       db,
       isReadOnlyMode,
+      allowCrossDb,
       signal: ctx.mcpReq.signal,
     }),
   );
