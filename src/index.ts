@@ -1,6 +1,8 @@
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { timingSafeEqual } from "node:crypto";
+import { toNodeHandler } from "@modelcontextprotocol/node";
+import { createMcpHandler } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { createMcpExpressApp } from "@modelcontextprotocol/express";
 import type { MongoClient } from "mongodb";
 import { connectToMongoDB } from "./mongo.js";
 import { createServer } from "./server.js";
@@ -16,17 +18,30 @@ async function main() {
   // Default to environment variables
   let connectionUrl = "";
   let readOnlyMode = process.env.MCP_MONGODB_READONLY === "true" || false;
+  let allowCrossDb = process.env.MCP_MONGODB_ALLOW_CROSS_DB === "true" || false;
+  let allowServerJs =
+    process.env.MCP_MONGODB_ALLOW_SERVER_JS === "true" || false;
   let transportMode: "stdio" | "http" = "stdio";
   let port = Number(process.env.MCP_PORT) || 3001;
   const allowedOrigins = (process.env.MCP_HTTP_ALLOWED_ORIGINS || "")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
+  // Max HTTP request body size. Defaults to 10mb to match the stdio transport's
+  // buffer, instead of Express's surprisingly low 100kb default.
+  let jsonLimit = process.env.MCP_HTTP_JSON_LIMIT || "10mb";
+  // Optional static bearer token for the HTTP transport. When set, every
+  // request must carry `Authorization: Bearer <token>`. Empty = no auth.
+  let authToken = process.env.MCP_HTTP_AUTH_TOKEN || "";
 
   // Parse command line arguments (these take precedence)
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--read-only" || args[i] === "-r") {
       readOnlyMode = true;
+    } else if (args[i] === "--allow-cross-db") {
+      allowCrossDb = true;
+    } else if (args[i] === "--allow-server-js") {
+      allowServerJs = true;
     } else if (args[i] === "--transport" || args[i] === "-t") {
       const value = args[++i];
       if (value !== "stdio" && value !== "http") {
@@ -47,6 +62,12 @@ async function main() {
           .map((origin) => origin.trim())
           .filter(Boolean),
       );
+    } else if (args[i] === "--json-limit") {
+      const value = args[++i];
+      if (value) jsonLimit = value;
+    } else if (args[i] === "--auth-token") {
+      const value = args[++i];
+      if (value) authToken = value;
     } else if (!connectionUrl) {
       connectionUrl = args[i];
     }
@@ -96,9 +117,25 @@ async function main() {
     }
 
     if (transportMode === "http") {
-      await startHttpServer(client, db, isReadOnlyMode, port, allowedOrigins);
+      await startHttpServer(
+        client,
+        db,
+        isReadOnlyMode,
+        allowCrossDb,
+        allowServerJs,
+        port,
+        allowedOrigins,
+        jsonLimit,
+        authToken,
+      );
     } else {
-      await startStdioServer(client, db, isReadOnlyMode);
+      await startStdioServer(
+        client,
+        db,
+        isReadOnlyMode,
+        allowCrossDb,
+        allowServerJs,
+      );
     }
   } catch (error) {
     console.error("Failed to connect to MongoDB:", error);
@@ -116,10 +153,15 @@ async function startStdioServer(
   client: MongoClient,
   db: import("mongodb").Db,
   isReadOnlyMode: boolean,
+  allowCrossDb: boolean,
+  allowServerJs: boolean,
 ) {
-  const server = createServer(client, db, isReadOnlyMode);
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  // serveStdio owns the era decision: a 2026-07-28 client opening is served the
+  // modern protocol, a 2025-era opening is served via the legacy shim — one
+  // factory, both eras.
+  serveStdio(() =>
+    createServer(client, db, isReadOnlyMode, allowCrossDb, allowServerJs),
+  );
   console.warn("Server connected successfully via stdio");
 }
 
@@ -156,16 +198,39 @@ function isOriginAllowed(
 }
 
 /**
+ * Validate an `Authorization: Bearer <token>` header against the expected
+ * token using a constant-time comparison to avoid leaking it via timing.
+ */
+function bearerTokenValid(
+  authorization: string | undefined,
+  expected: string,
+): boolean {
+  const prefix = "Bearer ";
+  if (!authorization?.startsWith(prefix)) {
+    return false;
+  }
+  const provided = Buffer.from(authorization.slice(prefix.length));
+  const wanted = Buffer.from(expected);
+  return (
+    provided.length === wanted.length && timingSafeEqual(provided, wanted)
+  );
+}
+
+/**
  * Start the server with Streamable HTTP transport.
  */
 async function startHttpServer(
   client: MongoClient,
   db: import("mongodb").Db,
   isReadOnlyMode: boolean,
+  allowCrossDb: boolean,
+  allowServerJs: boolean,
   port: number,
   allowedOrigins: string[],
+  jsonLimit: string,
+  authToken: string,
 ) {
-  const app = createMcpExpressApp({ host: "0.0.0.0" });
+  const app = createMcpExpressApp({ host: "0.0.0.0", jsonLimit });
 
   // Request logging middleware
   app.use((req, res, next) => {
@@ -207,58 +272,68 @@ async function startHttpServer(
     next();
   });
 
-  app.post("/mcp", async (req, res) => {
-    const server = createServer(client, db, isReadOnlyMode);
-    try {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      });
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
-      res.on("close", () => {
-        transport.close();
-        server.close();
-      });
-    } catch (error) {
-      console.error("Error handling MCP request:", error);
-      if (!res.headersSent) {
-        res.status(500).json({
-          jsonrpc: "2.0",
-          error: {
-            code: -32603,
-            message: "Internal server error",
-          },
-          id: null,
-        });
+  // Optional bearer-token auth: when a token is configured, every request must
+  // present it. Invalid or missing tokens get a 401 with a Bearer challenge, as
+  // required by the MCP authorization spec (RFC 6750 / OAuth 2.1 Section 5.3).
+  if (authToken) {
+    app.use((req, res, next) => {
+      if (!bearerTokenValid(req.headers.authorization, authToken)) {
+        res
+          .status(401)
+          .set("WWW-Authenticate", 'Bearer realm="mcp", error="invalid_token"')
+          .json({
+            jsonrpc: "2.0",
+            error: {
+              code: -32001,
+              message: "Unauthorized: missing or invalid bearer token",
+            },
+            id: null,
+          });
+        return;
       }
-    }
+      next();
+    });
+  }
+
+  // Modern stateless MCP handler: one factory serves both the 2026-07-28 and
+  // legacy (2025-era) protocols per request. toNodeHandler adapts the
+  // fetch-shaped handler to Express, forwarding the body express.json() parsed.
+  const mcpHandler = createMcpHandler((_ctx) =>
+    createServer(client, db, isReadOnlyMode, allowCrossDb, allowServerJs),
+  );
+  const nodeHandler = toNodeHandler(mcpHandler, {
+    onerror: (error) => console.error("Error handling MCP request:", error),
   });
 
-  app.get("/mcp", async (_req, res) => {
-    res.writeHead(405).end(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        error: {
-          code: -32000,
-          message: "Method not allowed.",
-        },
-        id: null,
-      }),
-    );
-  });
+  app.all("/mcp", (req, res) => nodeHandler(req, res, req.body));
 
-  app.delete("/mcp", async (_req, res) => {
-    res.writeHead(405).end(
-      JSON.stringify({
+  // Turn body-parser failures (payload too large, malformed JSON) into
+  // JSON-RPC errors instead of Express's default HTML error page.
+  app.use(
+    (
+      err: { type?: string; status?: number; statusCode?: number; message?: string },
+      _req: unknown,
+      res: {
+        headersSent: boolean;
+        status: (code: number) => { json: (body: unknown) => void };
+      },
+      next: (err?: unknown) => void,
+    ) => {
+      if (res.headersSent) return next(err);
+      const status = err.status ?? err.statusCode ?? 400;
+      const tooLarge = err.type === "entity.too.large" || status === 413;
+      res.status(tooLarge ? 413 : 400).json({
         jsonrpc: "2.0",
         error: {
-          code: -32000,
-          message: "Method not allowed.",
+          code: tooLarge ? -32600 : -32700,
+          message: tooLarge
+            ? "Request body exceeds the configured size limit"
+            : `Invalid request body: ${err.message ?? "parse error"}`,
         },
         id: null,
-      }),
-    );
-  });
+      });
+    },
+  );
 
   app.listen(port, () => {
     console.log(`MCP MongoDB Streamable HTTP Server listening on port ${port}`);

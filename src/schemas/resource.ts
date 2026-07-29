@@ -1,7 +1,9 @@
-import type {
-  ListResourcesRequest,
-  ReadResourceRequest,
-} from "@modelcontextprotocol/sdk/types.js";
+import {
+  type ListResourcesRequest,
+  ProtocolError,
+  ProtocolErrorCode,
+  type ReadResourceRequest,
+} from "@modelcontextprotocol/server";
 import type {
   CollectionInfo,
   Db,
@@ -205,8 +207,39 @@ export async function handleReadResourceRequest({
   signal?: AbortSignal;
   sendProgress?: SendProgressFn;
 }) {
-  const url = new URL(request.params.uri);
-  const collectionName = url.pathname.replace(/^\//, "");
+  // Validate the resource URI. A malformed URI or a missing/invalid collection
+  // name is a bad request: per the 2026-07-28 spec, resources/read misses use
+  // InvalidParams (-32602) rather than the legacy -32002 (SEP-2164).
+  let collectionName: string;
+  try {
+    const url = new URL(request.params.uri);
+    if (url.protocol !== "mongodb:") {
+      throw new ProtocolError(
+        ProtocolErrorCode.InvalidParams,
+        `Unsupported resource URI scheme '${url.protocol}': expected 'mongodb:'`,
+      );
+    }
+    collectionName = url.pathname.replace(/^\//, "");
+  } catch (error) {
+    if (error instanceof ProtocolError) throw error;
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      `Invalid resource URI: ${request.params.uri}`,
+    );
+  }
+
+  if (!collectionName) {
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      "Resource URI is missing a collection name",
+    );
+  }
+  if (collectionName.startsWith("system.")) {
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      "Access to system collections is not allowed",
+    );
+  }
 
   try {
     const collection = db.collection(collectionName);
