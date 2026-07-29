@@ -1,4 +1,4 @@
-import type { PingRequest } from "@modelcontextprotocol/sdk/types.js";
+import type { PingRequest } from "@modelcontextprotocol/server";
 import type { Db, MongoClient } from "mongodb";
 
 export async function handlePingRequest({

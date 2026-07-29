@@ -79,3 +79,20 @@
     includeDebugInfo: true  // Optional
   }
   ```
+
+## Utilities
+
+- **convertTime**: Convert a Unix timestamp or date string to UTC ISO 8601, GMT,
+  and Unix seconds/milliseconds, and report the server's current time and
+  timezone. Handy for building unambiguous date queries when the server and user
+  are in different timezones.
+  ```javascript
+  // Current server time (omit input)
+  {}
+
+  // From a Unix timestamp (seconds or milliseconds, auto-detected)
+  { input: 1735732800 }
+
+  // From a date string (with or without a timezone offset)
+  { input: "2025-06-15T08:30:00+03:00" }
+  ```

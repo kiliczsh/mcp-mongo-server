@@ -1,19 +1,5 @@
-import {
-  InMemoryTaskMessageQueue,
-  InMemoryTaskStore,
-} from "@modelcontextprotocol/sdk/experimental/tasks";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import {
-  CallToolRequestSchema,
-  CompleteRequestSchema,
-  GetPromptRequestSchema,
-  ListPromptsRequestSchema,
-  ListResourcesRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  ListToolsRequestSchema,
-  PingRequestSchema,
-  ReadResourceRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/server";
+import type { Notification } from "@modelcontextprotocol/server";
 import type { Db, MongoClient } from "mongodb";
 import { handleCallToolRequest } from "./schemas/call.js";
 import { handleCompletionRequest } from "./schemas/completion.js";
@@ -35,22 +21,16 @@ export type SendProgressFn = (
   message?: string,
 ) => Promise<void>;
 
-function createSendProgress(extra: {
-  _meta?: { progressToken?: string | number };
-  sendNotification: (notification: {
-    method: "notifications/progress";
-    params: {
-      progressToken: string | number;
-      progress: number;
-      total?: number;
-      message?: string;
-    };
-  }) => Promise<void>;
-}): SendProgressFn | undefined {
-  const progressToken = extra._meta?.progressToken;
+// Build a progress reporter bound to the request's progressToken. Returns
+// undefined when the client did not request progress. In v2 the reporter emits
+// via the per-request notify surface (ctx.mcpReq.notify).
+function createSendProgress(
+  progressToken: string | number | undefined,
+  notify: (notification: Notification) => Promise<void>,
+): SendProgressFn | undefined {
   if (progressToken === undefined) return undefined;
   return (progress, total, message) =>
-    extra.sendNotification({
+    notify({
       method: "notifications/progress",
       params: { progressToken, progress, total, message },
     });
@@ -64,18 +44,17 @@ export function createServer(
   client: MongoClient,
   db: Db,
   isReadOnlyMode = false,
+  allowCrossDb = false,
+  allowServerJs = false,
   options = {},
 ) {
-  const taskStore = new InMemoryTaskStore();
-  const taskMessageQueue = new InMemoryTaskMessageQueue();
-
   const server = new Server(
     {
       name: "mongodb",
       title: "MongoDB MCP Server",
-      version: "2.1.1",
+      version: "3.0.0",
       description:
-        "MCP server for MongoDB: query, aggregate, and manage collections with read-only mode, progress notifications, cancellation, and task support",
+        "MCP server for MongoDB: query, aggregate, and manage collections with read-only mode, progress notifications, and cancellation",
       websiteUrl: "https://github.com/kiliczsh/mcp-mongo-server",
       ...options,
     },
@@ -85,14 +64,7 @@ export function createServer(
         resources: {},
         tools: {},
         prompts: {},
-        tasks: {
-          list: {},
-          cancel: {},
-          requests: { tools: { call: {} } },
-        },
       },
-      taskStore,
-      taskMessageQueue,
       ...options,
     },
   );
@@ -100,97 +72,101 @@ export function createServer(
   /**
    * Handler for ping requests to check server health
    */
-  server.setRequestHandler(PingRequestSchema, (request, extra) =>
+  server.setRequestHandler('ping', (request, ctx) =>
     handlePingRequest({
       request,
       client,
       db,
       isReadOnlyMode,
-      signal: extra.signal,
+      signal: ctx.mcpReq.signal,
     }),
   );
 
   /**
    * Handler for listing available collections as resources.
    */
-  server.setRequestHandler(ListResourcesRequestSchema, (request, extra) =>
+  server.setRequestHandler('resources/list', (request, ctx) =>
     handleListResourcesRequest({
       request,
       client,
       db,
       isReadOnlyMode,
-      signal: extra.signal,
+      signal: ctx.mcpReq.signal,
     }),
   );
 
   /**
    * Handler for reading a collection's schema or contents.
    */
-  server.setRequestHandler(ReadResourceRequestSchema, (request, extra) =>
+  server.setRequestHandler('resources/read', (request, ctx) =>
     handleReadResourceRequest({
       request,
       client,
       db,
       isReadOnlyMode,
-      signal: extra.signal,
-      sendProgress: createSendProgress(extra),
+      signal: ctx.mcpReq.signal,
+      sendProgress: createSendProgress(
+        request.params._meta?.progressToken,
+        ctx.mcpReq.notify,
+      ),
     }),
   );
 
   /**
    * Handler that lists available tools.
    */
-  server.setRequestHandler(ListToolsRequestSchema, (request, extra) =>
+  server.setRequestHandler('tools/list', (request, ctx) =>
     handleListToolsRequest({
       request,
       client,
       db,
       isReadOnlyMode,
-      signal: extra.signal,
+      signal: ctx.mcpReq.signal,
     }),
   );
 
   /**
    * Handler for MongoDB tools.
    */
-  server.setRequestHandler(CallToolRequestSchema, (request, extra) => {
-    // Only enter task path when the client explicitly requests it
-    const hasTaskParams = !!(request.params as Record<string, unknown>).task;
-    return handleCallToolRequest({
+  server.setRequestHandler('tools/call', (request, ctx) =>
+    handleCallToolRequest({
       request,
       client,
       db,
       isReadOnlyMode,
-      signal: extra.signal,
-      taskStore: hasTaskParams ? extra.taskStore : undefined,
-      taskTtl: hasTaskParams ? extra.taskRequestedTtl : undefined,
-    });
-  });
+      allowCrossDb,
+      allowServerJs,
+      signal: ctx.mcpReq.signal,
+    }),
+  );
 
   /**
    * Handler that lists available prompts.
    */
-  server.setRequestHandler(ListPromptsRequestSchema, (request, extra) =>
+  server.setRequestHandler('prompts/list', (request, ctx) =>
     handleListPromptsRequest({
       request,
       client,
       db,
       isReadOnlyMode,
-      signal: extra.signal,
+      signal: ctx.mcpReq.signal,
     }),
   );
 
   /**
    * Handler for collection analysis prompt.
    */
-  server.setRequestHandler(GetPromptRequestSchema, (request, extra) =>
+  server.setRequestHandler('prompts/get', (request, ctx) =>
     handleGetPromptRequest({
       request,
       client,
       db,
       isReadOnlyMode,
-      signal: extra.signal,
-      sendProgress: createSendProgress(extra),
+      signal: ctx.mcpReq.signal,
+      sendProgress: createSendProgress(
+        request.params._meta?.progressToken,
+        ctx.mcpReq.notify,
+      ),
     }),
   );
 
@@ -198,27 +174,27 @@ export function createServer(
    * Handler for listing templates.
    */
   server.setRequestHandler(
-    ListResourceTemplatesRequestSchema,
-    (request, extra) =>
+    'resources/templates/list',
+    (request, ctx) =>
       handleListResourceTemplatesRequest({
         request,
         client,
         db,
         isReadOnlyMode,
-        signal: extra.signal,
+        signal: ctx.mcpReq.signal,
       }),
   );
 
   /**
    * Handler for completion requests.
    */
-  server.setRequestHandler(CompleteRequestSchema, (request, extra) =>
+  server.setRequestHandler('completion/complete', (request, ctx) =>
     handleCompletionRequest({
       request,
       client,
       db,
       isReadOnlyMode,
-      signal: extra.signal,
+      signal: ctx.mcpReq.signal,
     }),
   );
 

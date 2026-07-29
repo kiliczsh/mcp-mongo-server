@@ -1,9 +1,12 @@
 {
   "name": "mcp-mongo-server",
-  "version": "2.1.1",
+  "version": "3.0.0",
   "description": "A Model Context Protocol server for MongoDB connections",
   "private": false,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "mongodb": "./build/index.js"
   },
@@ -23,12 +26,14 @@
     "inspector": "mcp-inspector --config inspector-config.json --server mongodb"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "mongodb": "^7.5.0",
-    "zod": "^4.4.3"
+    "@modelcontextprotocol/express": "^2.0.0",
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "mongodb": "^7.5.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",
+    "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/inspector": "^1.0.0",
     "@types/node": "^26.1.1",
     "tsup": "^8.5.1",
