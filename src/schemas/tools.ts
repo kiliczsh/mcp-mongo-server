@@ -1,4 +1,7 @@
-import type { ListToolsRequest } from "@modelcontextprotocol/sdk/types.js";
+import type {
+  ListToolsRequest,
+  ListToolsResult,
+} from "@modelcontextprotocol/server";
 import type { Db, MongoClient } from "mongodb";
 
 export async function handleListToolsRequest({
@@ -13,14 +16,13 @@ export async function handleListToolsRequest({
   db: Db;
   isReadOnlyMode: boolean;
   signal?: AbortSignal;
-}) {
+}): Promise<ListToolsResult> {
   return {
     tools: [
       {
         name: "query",
         description:
           "Execute a MongoDB query with optional execution plan analysis",
-        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -48,6 +50,11 @@ export async function handleListToolsRequest({
                 "Number of documents to skip before returning results",
               default: 0,
             },
+            sort: {
+              type: "object",
+              description:
+                "Sort order as a field-to-direction map, e.g. { orderDate: -1 } for descending or { name: 1 } for ascending",
+            },
             explain: {
               type: "string",
               description: "Optional: Get query execution information",
@@ -67,7 +74,6 @@ export async function handleListToolsRequest({
         name: "aggregate",
         description:
           "Execute a MongoDB aggregation pipeline with optional execution plan analysis",
-        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -102,7 +108,6 @@ export async function handleListToolsRequest({
       {
         name: "update",
         description: "Update documents in a MongoDB collection",
-        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -143,7 +148,6 @@ export async function handleListToolsRequest({
         name: "serverInfo",
         description:
           "Get MongoDB server information including version, storage engine, and other details",
-        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -158,7 +162,6 @@ export async function handleListToolsRequest({
       {
         name: "insert",
         description: "Insert one or more documents into a MongoDB collection",
-        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -197,7 +200,6 @@ export async function handleListToolsRequest({
       {
         name: "createIndex",
         description: "Create one or more indexes on a MongoDB collection",
-        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -264,7 +266,6 @@ export async function handleListToolsRequest({
       {
         name: "count",
         description: "Count documents in a collection matching a query",
-        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -295,7 +296,6 @@ export async function handleListToolsRequest({
       {
         name: "listCollections",
         description: "List all collections in the MongoDB database",
-        execution: { taskSupport: "optional" },
         inputSchema: {
           type: "object",
           properties: {
@@ -323,6 +323,21 @@ export async function handleListToolsRequest({
               description: "Control how 24-character hex strings are handled",
               enum: ["auto", "none", "force"],
               default: "auto",
+            },
+          },
+        },
+      },
+      {
+        name: "convertTime",
+        description:
+          "Convert a Unix timestamp or date string to multiple formats (UTC ISO 8601, GMT, Unix seconds/milliseconds) and report the server's current time and timezone. Useful for building unambiguous date queries when the server and user are in different timezones. Omit 'input' to get the current time.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            input: {
+              type: "string",
+              description:
+                "A Unix timestamp (seconds or milliseconds, as a number or numeric string) or a date string (ISO 8601, with or without a timezone offset). Omit to use the current server time.",
             },
           },
         },

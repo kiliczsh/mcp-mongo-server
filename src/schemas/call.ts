@@ -1,10 +1,8 @@
-import type { CreateTaskResult } from "@modelcontextprotocol/sdk/experimental/tasks";
-import type { RequestTaskStore } from "@modelcontextprotocol/sdk/shared/protocol.js";
-import {
-  type CallToolRequest,
-  ErrorCode,
-  McpError,
-} from "@modelcontextprotocol/sdk/types.js";
+import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
+import type {
+  CallToolRequest,
+  CallToolResult,
+} from "@modelcontextprotocol/server";
 import type {
   BulkWriteOptions,
   CollationOptions,
@@ -22,13 +20,6 @@ import type {
 import { ObjectId } from "mongodb";
 
 // MongoDB return type interfaces
-interface CreateIndexesResult {
-  acknowledged: boolean;
-  createdIndexes: string[];
-  numIndexesBefore: number;
-  numIndexesAfter: number;
-}
-
 interface BulkWriteError extends Error {
   name: string;
   writeErrors?: Array<unknown>;
@@ -47,7 +38,8 @@ type MongoOperation =
   | "insert"
   | "createIndex"
   | "count"
-  | "listCollections";
+  | "listCollections"
+  | "convertTime";
 
 // Define operations that require a collection
 const COLLECTION_OPERATIONS = [
@@ -62,26 +54,49 @@ const COLLECTION_OPERATIONS = [
 // Define write operations that are blocked in read-only mode
 const WRITE_OPERATIONS = ["update", "insert", "createIndex"];
 
-// Aggregation stages/operators that must never run in read-only mode:
-// write stages ($out, $merge) can create or replace collections, and
-// server-side JavaScript operators ($function, $accumulator, $where) allow
-// arbitrary code execution. All are matched case-sensitively as object keys.
-const READONLY_FORBIDDEN_AGG_OPERATORS = new Set([
-  "$out",
-  "$merge",
+// Maximum object nesting depth we will walk when converting ObjectId/date
+// strings. Matches MongoDB's own BSON nesting limit, so we reject the same
+// inputs it would — but with a clear error and without risking a stack
+// overflow on pathologically deep input.
+const MAX_OBJECT_DEPTH = 100;
+
+// Aggregation write stages ($out, $merge) can create or replace collections.
+const WRITE_AGG_STAGES = new Set(["$out", "$merge"]);
+
+// Server-side JavaScript operators allow arbitrary code execution on the
+// MongoDB server (and are a denial-of-service vector via infinite loops).
+const SERVER_JS_AGG_OPERATORS = new Set([
   "$function",
   "$accumulator",
   "$where",
 ]);
 
+// Everything blocked in read-only mode: no writes and no server-side JS.
+const READONLY_FORBIDDEN_AGG_OPERATORS = new Set([
+  ...WRITE_AGG_STAGES,
+  ...SERVER_JS_AGG_OPERATORS,
+]);
+
 /**
- * Recursively scan an aggregation pipeline for operators that are forbidden in
- * read-only mode. Returns the first forbidden operator found, or null.
+ * Recursively scan an aggregation pipeline for any operator in `operators`
+ * (matched case-sensitively as object keys). Returns the first match, or null.
+ * Guards against overly deep nesting so a pathological pipeline can't overflow
+ * the stack before the operator/depth checks run.
  */
-function findForbiddenAggOperator(value: unknown): string | null {
+function findAggOperator(
+  value: unknown,
+  operators: Set<string>,
+  depth = 0,
+): string | null {
+  if (depth > MAX_OBJECT_DEPTH) {
+    throw new Error(
+      `Object nesting exceeds the maximum depth of ${MAX_OBJECT_DEPTH}`,
+    );
+  }
+
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = findForbiddenAggOperator(item);
+      const found = findAggOperator(item, operators, depth + 1);
       if (found) return found;
     }
     return null;
@@ -89,12 +104,50 @@ function findForbiddenAggOperator(value: unknown): string | null {
 
   if (value && typeof value === "object") {
     for (const [key, nested] of Object.entries(value)) {
-      if (READONLY_FORBIDDEN_AGG_OPERATORS.has(key)) {
+      if (operators.has(key)) {
         return key;
       }
-      const found = findForbiddenAggOperator(nested);
+      const found = findAggOperator(nested, operators, depth + 1);
       if (found) return found;
     }
+  }
+
+  return null;
+}
+
+/**
+ * Scan an aggregation pipeline for stages that read from or write to a database
+ * other than the connected one ($out, $merge, $lookup with an explicit `db`).
+ * Returns the first foreign database name found, or null. Used to keep the
+ * server scoped to its connected database unless cross-database access is
+ * explicitly enabled.
+ */
+function findCrossDbTarget(
+  pipeline: unknown[],
+  connectedDb: string,
+): string | null {
+  const foreignDb = (target: unknown): string | null => {
+    if (target && typeof target === "object" && "db" in target) {
+      const db = (target as { db?: unknown }).db;
+      if (typeof db === "string" && db && db !== connectedDb) return db;
+    }
+    return null;
+  };
+
+  for (const stage of pipeline) {
+    if (!stage || typeof stage !== "object") continue;
+    const s = stage as Record<string, unknown>;
+    // $out: "<db>.<coll>" is same-db; { db, coll } may target another db
+    const out = foreignDb(s.$out);
+    if (out) return out;
+    // $merge: { into: "<coll>" | { db, coll } }
+    const merge = s.$merge as { into?: unknown } | undefined;
+    const mergeInto = foreignDb(merge?.into ?? s.$merge);
+    if (mergeInto) return mergeInto;
+    // $lookup: { from: { db, coll } } (cross-db read)
+    const lookup = s.$lookup as { from?: unknown } | undefined;
+    const lookupFrom = foreignDb(lookup?.from);
+    if (lookupFrom) return lookupFrom;
   }
 
   return null;
@@ -108,17 +161,17 @@ export async function handleCallToolRequest({
   client,
   db,
   isReadOnlyMode,
+  allowCrossDb = false,
+  allowServerJs = false,
   signal,
-  taskStore,
-  taskTtl,
 }: {
   request: CallToolRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
+  allowCrossDb?: boolean;
+  allowServerJs?: boolean;
   signal?: AbortSignal;
-  taskStore?: RequestTaskStore;
-  taskTtl?: number | null;
 }) {
   const { name, arguments: args = {} } = request.params;
   const operation = name as MongoOperation;
@@ -171,55 +224,20 @@ export async function handleCallToolRequest({
 
     signal?.throwIfAborted();
 
-    // Task-augmented request: create task, run async, return immediately
-    if (taskStore) {
-      const task = await taskStore.createTask({
-        ttl: taskTtl ?? undefined,
-      });
-
-      // Fire-and-forget: run the operation in the background
-      (async () => {
-        try {
-          const result = await executeOperation(
-            operation,
-            collection,
-            db,
-            isReadOnlyMode,
-            args,
-            objectIdMode,
-            signal,
-          );
-          await taskStore.storeTaskResult(task.taskId, "completed", result);
-        } catch (error) {
-          try {
-            const message =
-              error instanceof Error ? error.message : "Unknown error";
-            await taskStore.storeTaskResult(task.taskId, "failed", {
-              content: [{ type: "text", text: message }],
-              isError: true,
-            });
-          } catch {
-            // Task may already be in a terminal state (cancelled, completed, or failed)
-          }
-        }
-      })();
-
-      return { task } as CreateTaskResult;
-    }
-
-    // Synchronous execution path
     return await executeOperation(
       operation,
       collection,
       db,
       isReadOnlyMode,
+      allowCrossDb,
+      allowServerJs,
       args,
       objectIdMode,
       signal,
     );
   } catch (error) {
     // Protocol-level errors and cancellation propagate unchanged
-    if (error instanceof McpError || signal?.aborted) {
+    if (error instanceof ProtocolError || signal?.aborted) {
       throw error;
     }
     return toolExecutionError(
@@ -233,6 +251,8 @@ async function executeOperation(
   collection: Collection<Document> | null,
   db: Db,
   isReadOnlyMode: boolean,
+  allowCrossDb: boolean,
+  allowServerJs: boolean,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode,
   signal?: AbortSignal,
@@ -246,6 +266,8 @@ async function executeOperation(
         args,
         objectIdMode,
         isReadOnlyMode,
+        allowCrossDb,
+        allowServerJs,
         signal,
       );
     case "update":
@@ -260,8 +282,10 @@ async function executeOperation(
       return handleCount(collection, args, objectIdMode, signal);
     case "listCollections":
       return handleListCollections(db, args, objectIdMode, signal);
+    case "convertTime":
+      return handleConvertTime(args);
     default:
-      throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${operation}`);
+      throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown tool: ${operation}`);
   }
 }
 
@@ -277,10 +301,11 @@ function validateOperation(operation: MongoOperation): void {
     "createIndex",
     "count",
     "listCollections",
+    "convertTime",
   ];
 
   if (!validOperations.includes(operation)) {
-    throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${operation}`);
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown tool: ${operation}`);
   }
 }
 
@@ -288,7 +313,8 @@ function validateCollection(collection: Collection<Document>): void {
   if (!collection.collectionName) {
     throw new Error("Collection name cannot be empty");
   }
-  if (collection.collectionName.startsWith("system.")) {
+  // Case-insensitive so 'System.' and other casings can't slip past the guard.
+  if (collection.collectionName.toLowerCase().startsWith("system.")) {
     throw new Error("Access to system collections is not allowed");
   }
 }
@@ -364,7 +390,14 @@ function isObjectIdField(fieldName: string): boolean {
 function processObjectIdInFilter(
   filter: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  depth = 0,
 ): Filter<Document> {
+  if (depth > MAX_OBJECT_DEPTH) {
+    throw new Error(
+      `Object nesting exceeds the maximum depth of ${MAX_OBJECT_DEPTH}`,
+    );
+  }
+
   // If objectIdMode is "none", don't convert any strings to ObjectIds
   if (objectIdMode === "none") {
     // Create a new filter object to handle dates
@@ -407,6 +440,7 @@ function processObjectIdInFilter(
           result[key] = processObjectIdInFilter(
             value as Record<string, unknown>,
             "none",
+            depth + 1,
           );
         }
       } else {
@@ -474,6 +508,7 @@ function processObjectIdInFilter(
         result[key] = processObjectIdInFilter(
           value as Record<string, unknown>,
           objectIdMode,
+          depth + 1,
         );
       }
     } else {
@@ -490,15 +525,17 @@ function isObjectIdString(str: string): boolean {
   return /^[0-9a-fA-F]{24}$/.test(str);
 }
 
-// Helper function to check if a string is in ISO date format
+// Helper function to check if a string is an unambiguous ISO 8601 timestamp.
+// Requires an explicit timezone — either 'Z' (UTC) or a numeric offset like
+// '+03:00' — so a value always maps to one instant regardless of the server's
+// timezone. Timezone-less strings are intentionally left as plain strings.
 function isISODateString(str: string): boolean {
-  // Check if string matches ISO 8601 format
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(str);
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.test(
+    str,
+  );
 }
 
-function formatResponse(data: unknown): {
-  content: [{ type: string; text: string }];
-} {
+function formatResponse(data: unknown): CallToolResult {
   return {
     content: [
       {
@@ -509,10 +546,7 @@ function formatResponse(data: unknown): {
   };
 }
 
-function toolExecutionError(message: string): {
-  content: [{ type: string; text: string }];
-  isError: true;
-} {
+function toolExecutionError(message: string): CallToolResult {
   return {
     content: [{ type: "text", text: message }],
     isError: true,
@@ -598,6 +632,8 @@ async function handleAggregate(
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
   isReadOnlyMode = false,
+  allowCrossDb = false,
+  allowServerJs = false,
   signal?: AbortSignal,
 ) {
   if (!collection) {
@@ -613,10 +649,36 @@ async function handleAggregate(
   // execute server-side JavaScript. Without this an aggregate ending in $out
   // or $merge would bypass read-only protection and overwrite collections.
   if (isReadOnlyMode) {
-    const forbidden = findForbiddenAggOperator(pipeline);
+    const forbidden = findAggOperator(
+      pipeline,
+      READONLY_FORBIDDEN_AGG_OPERATORS,
+    );
     if (forbidden) {
       throw new Error(
         `ReadonlyError: Aggregation operator '${forbidden}' is not allowed in read-only mode`,
+      );
+    }
+  }
+
+  // Server-side JavaScript ($function/$where/$accumulator) is arbitrary code
+  // execution on the MongoDB server; reject it by default even outside
+  // read-only mode, unless explicitly enabled.
+  if (!allowServerJs) {
+    const js = findAggOperator(pipeline, SERVER_JS_AGG_OPERATORS);
+    if (js) {
+      throw new Error(
+        `Server-side JavaScript operator '${js}' is not allowed. Enable it with --allow-server-js or MCP_MONGODB_ALLOW_SERVER_JS=true.`,
+      );
+    }
+  }
+
+  // Keep the server scoped to its connected database: reject $out/$merge/$lookup
+  // that target another database, unless cross-database access is enabled.
+  if (!allowCrossDb) {
+    const foreignDb = findCrossDbTarget(pipeline, collection.dbName);
+    if (foreignDb) {
+      throw new Error(
+        `Cross-database access to '${foreignDb}' is not allowed (connected database is '${collection.dbName}'). Enable it with --allow-cross-db or MCP_MONGODB_ALLOW_CROSS_DB=true.`,
       );
     }
   }
@@ -922,19 +984,16 @@ async function handleCreateIndex(
     };
 
     signal?.throwIfAborted();
-    const result = await collection.createIndexes(
+    // The driver's createIndexes resolves to the list of created index names.
+    const createdIndexes = await collection.createIndexes(
       processedIndexes,
       indexOptions,
     );
 
-    // Type assertion for createIndexes result
     return formatResponse({
-      acknowledged: (result as unknown as CreateIndexesResult).acknowledged,
-      createdIndexes: (result as unknown as CreateIndexesResult).createdIndexes,
-      numIndexesBefore: (result as unknown as CreateIndexesResult)
-        .numIndexesBefore,
-      numIndexesAfter: (result as unknown as CreateIndexesResult)
-        .numIndexesAfter,
+      acknowledged: true,
+      createdIndexes,
+      indexCount: createdIndexes.length,
     });
   } catch (error) {
     return handleError(error, "create indexes", collection.collectionName);
@@ -991,6 +1050,59 @@ async function handleCount(
   } catch (error) {
     return handleError(error, "count documents", collection.collectionName);
   }
+}
+
+function handleConvertTime(args: Record<string, unknown>): CallToolResult {
+  const { input } = args;
+  let date: Date;
+
+  if (input === undefined || input === null || input === "") {
+    // No input: report the current time.
+    date = new Date();
+  } else if (typeof input === "number") {
+    // Auto-detect seconds vs milliseconds: values below ~1e12 (year 2001 in
+    // milliseconds) are treated as seconds, everything else as milliseconds.
+    date = new Date(Math.abs(input) < 1e12 ? input * 1000 : input);
+  } else if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (/^-?\d+$/.test(trimmed)) {
+      const n = Number(trimmed);
+      date = new Date(Math.abs(n) < 1e12 ? n * 1000 : n);
+    } else {
+      // Any date string the JS engine understands (ISO 8601, with or without
+      // an offset, RFC 2822, etc.).
+      date = new Date(trimmed);
+    }
+  } else {
+    throw new Error(
+      "convertTime 'input' must be a Unix timestamp (number) or a date string",
+    );
+  }
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(
+      `Could not interpret '${String(input)}' as a date or Unix timestamp`,
+    );
+  }
+
+  // Server timezone offset (in ±HH:MM), respecting DST for the given date.
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absMinutes = Math.abs(offsetMinutes);
+  const offsetLabel = `${sign}${String(Math.floor(absMinutes / 60)).padStart(
+    2,
+    "0",
+  )}:${String(absMinutes % 60).padStart(2, "0")}`;
+
+  return formatResponse({
+    iso: date.toISOString(),
+    utc: date.toUTCString(),
+    unixSeconds: Math.floor(date.getTime() / 1000),
+    unixMillis: date.getTime(),
+    serverLocal: date.toString(),
+    serverTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    serverUtcOffset: offsetLabel,
+  });
 }
 
 async function handleListCollections(
