@@ -26,14 +26,14 @@
     "inspector": "mcp-inspector --config inspector-config.json --server mongodb"
   },
   "dependencies": {
-    "@modelcontextprotocol/express": "^2.0.0-beta.5",
-    "@modelcontextprotocol/node": "^2.0.0-beta.5",
-    "@modelcontextprotocol/server": "^2.0.0-beta.5",
+    "@modelcontextprotocol/express": "^2.0.0",
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "mongodb": "^7.5.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",
-    "@modelcontextprotocol/client": "^2.0.0-beta.5",
+    "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/inspector": "^1.0.0",
     "@types/node": "^26.1.1",
     "tsup": "^8.5.1",
