@@ -1,6 +1,6 @@
 {
   "name": "mcp-mongo-server",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "A Model Context Protocol server for MongoDB connections",
   "private": false,
   "type": "module",
@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "bin": {
-    "mongodb": "./build/index.js"
+    "mcp-mongo-server": "./build/index.js"
   },
   "files": [
     "build"
