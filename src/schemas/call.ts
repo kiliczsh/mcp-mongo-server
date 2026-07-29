@@ -20,13 +20,6 @@ import type {
 import { ObjectId } from "mongodb";
 
 // MongoDB return type interfaces
-interface CreateIndexesResult {
-  acknowledged: boolean;
-  createdIndexes: string[];
-  numIndexesBefore: number;
-  numIndexesAfter: number;
-}
-
 interface BulkWriteError extends Error {
   name: string;
   writeErrors?: Array<unknown>;
@@ -991,19 +984,16 @@ async function handleCreateIndex(
     };
 
     signal?.throwIfAborted();
-    const result = await collection.createIndexes(
+    // The driver's createIndexes resolves to the list of created index names.
+    const createdIndexes = await collection.createIndexes(
       processedIndexes,
       indexOptions,
     );
 
-    // Type assertion for createIndexes result
     return formatResponse({
-      acknowledged: (result as unknown as CreateIndexesResult).acknowledged,
-      createdIndexes: (result as unknown as CreateIndexesResult).createdIndexes,
-      numIndexesBefore: (result as unknown as CreateIndexesResult)
-        .numIndexesBefore,
-      numIndexesAfter: (result as unknown as CreateIndexesResult)
-        .numIndexesAfter,
+      acknowledged: true,
+      createdIndexes,
+      indexCount: createdIndexes.length,
     });
   } catch (error) {
     return handleError(error, "create indexes", collection.collectionName);
