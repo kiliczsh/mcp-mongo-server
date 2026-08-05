@@ -1,4 +1,6 @@
 # MCP MongoDB Server
+
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fkiliczsh%2Fmcp-mongo-server.svg)](https://mcptoplist.com/server/glama%2Fkiliczsh%2Fmcp-mongo-server)
 ---
 
 ![NPM Version](https://img.shields.io/npm/v/mcp-mongo-server)
