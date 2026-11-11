@@ -4,11 +4,10 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createMcpExpressApp } from "@modelcontextprotocol/express";
 import type { MongoClient } from "mongodb";
-import { connectToMongoDB } from "./mongo.js";
+import { Connections } from "./connections.js";
 import { createServer } from "./server.js";
 
-// Declare a client variable in the global scope for cleanup handlers
-let mongoClient: MongoClient | null = null; // TODO: Fix Typescript error
+let connections: Connections | undefined;
 
 /**
  * Start the server using stdio transport and initialize MongoDB connection.
@@ -78,44 +77,13 @@ async function main() {
     connectionUrl = process.env.MCP_MONGODB_URI || "";
   }
 
-  if (!connectionUrl) {
-    console.error(
-      "Please provide a MongoDB connection URL via command-line argument or MCP_MONGODB_URI environment variable",
-    );
-    console.error(
-      "Usage: command <mongodb-url> [--read-only|-r] [--transport stdio|http] [--port 3001]",
-    );
-    console.error(
-      "   or: MCP_MONGODB_URI=<mongodb-url> [MCP_MONGODB_READONLY=true] command",
-    );
-    process.exit(1);
-  }
-
-  // Ensure connection URL has the correct prefix
-  if (
-    !connectionUrl.startsWith("mongodb://") &&
-    !connectionUrl.startsWith("mongodb+srv://")
-  ) {
-    console.error(
-      "Invalid MongoDB connection URL. URL must start with 'mongodb://' or 'mongodb+srv://'",
-    );
-    process.exit(1);
-  }
-
   try {
-    const { client, db, isConnected, isReadOnlyMode } = await connectToMongoDB(
+    connections = new Connections(
       connectionUrl,
+      process.env.MCP_MONGODB_CONNECTIONS,
       readOnlyMode,
     );
-
-    // Store client in global variable for cleanup
-    mongoClient = client;
-
-    if (!isConnected || !client || !db) {
-      console.error("Failed to connect to MongoDB");
-      process.exit(1);
-    }
-
+    const { client, db, isReadOnlyMode } = await connections.resolve();
     if (transportMode === "http") {
       await startHttpServer(
         client,
@@ -123,6 +91,7 @@ async function main() {
         isReadOnlyMode,
         allowCrossDb,
         allowServerJs,
+        connections,
         port,
         allowedOrigins,
         jsonLimit,
@@ -135,13 +104,12 @@ async function main() {
         isReadOnlyMode,
         allowCrossDb,
         allowServerJs,
+        connections,
       );
     }
   } catch (error) {
     console.error("Failed to connect to MongoDB:", error);
-    if (mongoClient) {
-      await mongoClient.close();
-    }
+    await connections?.close();
     process.exit(1);
   }
 }
@@ -155,12 +123,21 @@ async function startStdioServer(
   isReadOnlyMode: boolean,
   allowCrossDb: boolean,
   allowServerJs: boolean,
+  connections: Connections,
 ) {
   // serveStdio owns the era decision: a 2026-07-28 client opening is served the
   // modern protocol, a 2025-era opening is served via the legacy shim — one
   // factory, both eras.
   serveStdio(() =>
-    createServer(client, db, isReadOnlyMode, allowCrossDb, allowServerJs),
+    createServer(
+      client,
+      db,
+      isReadOnlyMode,
+      allowCrossDb,
+      allowServerJs,
+      {},
+      connections,
+    ),
   );
   console.warn("Server connected successfully via stdio");
 }
@@ -211,9 +188,7 @@ function bearerTokenValid(
   }
   const provided = Buffer.from(authorization.slice(prefix.length));
   const wanted = Buffer.from(expected);
-  return (
-    provided.length === wanted.length && timingSafeEqual(provided, wanted)
-  );
+  return provided.length === wanted.length && timingSafeEqual(provided, wanted);
 }
 
 /**
@@ -225,6 +200,7 @@ async function startHttpServer(
   isReadOnlyMode: boolean,
   allowCrossDb: boolean,
   allowServerJs: boolean,
+  connections: Connections,
   port: number,
   allowedOrigins: string[],
   jsonLimit: string,
@@ -299,7 +275,15 @@ async function startHttpServer(
   // legacy (2025-era) protocols per request. toNodeHandler adapts the
   // fetch-shaped handler to Express, forwarding the body express.json() parsed.
   const mcpHandler = createMcpHandler((_ctx) =>
-    createServer(client, db, isReadOnlyMode, allowCrossDb, allowServerJs),
+    createServer(
+      client,
+      db,
+      isReadOnlyMode,
+      allowCrossDb,
+      allowServerJs,
+      {},
+      connections,
+    ),
   );
   const nodeHandler = toNodeHandler(mcpHandler, {
     onerror: (error) => console.error("Error handling MCP request:", error),
@@ -311,7 +295,12 @@ async function startHttpServer(
   // JSON-RPC errors instead of Express's default HTML error page.
   app.use(
     (
-      err: { type?: string; status?: number; statusCode?: number; message?: string },
+      err: {
+        type?: string;
+        status?: number;
+        statusCode?: number;
+        message?: string;
+      },
       _req: unknown,
       res: {
         headersSent: boolean;
@@ -343,16 +332,12 @@ async function startHttpServer(
 
 // Handle cleanup
 process.on("SIGINT", async () => {
-  if (mongoClient) {
-    await mongoClient.close();
-  }
+  await connections?.close();
   process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
-  if (mongoClient) {
-    await mongoClient.close();
-  }
+  await connections?.close();
   process.exit(0);
 });
 

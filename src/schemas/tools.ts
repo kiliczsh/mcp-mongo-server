@@ -10,14 +10,16 @@ export async function handleListToolsRequest({
   db,
   isReadOnlyMode,
   signal,
+  connectionSelection = false,
 }: {
   request: ListToolsRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
   signal?: AbortSignal;
+  connectionSelection?: boolean;
 }): Promise<ListToolsResult> {
-  return {
+  const result: ListToolsResult = {
     tools: [
       {
         name: "query",
@@ -254,7 +256,8 @@ export async function handleListToolsRequest({
             },
             commitQuorum: {
               type: ["string", "number"],
-              description: "Replica-set commit quorum as a member count or a mode such as majority",
+              description:
+                "Replica-set commit quorum as a member count or a mode such as majority",
             },
             objectIdMode: {
               type: "string",
@@ -349,4 +352,40 @@ export async function handleListToolsRequest({
       },
     ],
   };
+  const { tools } = result;
+  if (connectionSelection) {
+    const connectionId = {
+      type: "string",
+      description: "Configured connection ID. Defaults to default.",
+    };
+    const database = {
+      type: "string",
+      description:
+        "Allowed database name. Defaults to the database in the connection URI.",
+    };
+    for (const tool of tools) {
+      if (tool.name !== "convertTime") {
+        tool.inputSchema.properties = {
+          ...tool.inputSchema.properties,
+          connectionId,
+          database,
+        };
+      }
+    }
+    tools.push(
+      {
+        name: "listConnections",
+        description:
+          "List configured connection IDs, default databases, and read-only policies.",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "listDatabases",
+        description:
+          "List existing authorized databases on a configured connection.",
+        inputSchema: { type: "object", properties: { connectionId } },
+      },
+    );
+  }
+  return result;
 }

@@ -12,12 +12,14 @@ export async function handleListPromptsRequest({
   db,
   isReadOnlyMode,
   signal,
+  connectionSelection = false,
 }: {
   request: ListPromptsRequest;
   client: MongoClient;
   db: Db;
   isReadOnlyMode: boolean;
   signal?: AbortSignal;
+  connectionSelection?: boolean;
 }) {
   return {
     prompts: [
@@ -30,6 +32,18 @@ export async function handleListPromptsRequest({
             description: "Name of the collection to analyze",
             required: true,
           },
+          ...(connectionSelection
+            ? [
+                {
+                  name: "connectionId",
+                  description: "Configured MongoDB connection ID",
+                },
+                {
+                  name: "database",
+                  description: "Allowed MongoDB database name",
+                },
+              ]
+            : []),
         ],
       },
     ],
@@ -43,6 +57,8 @@ export async function handleGetPromptRequest({
   isReadOnlyMode,
   signal,
   sendProgress,
+  connectionId,
+  showTarget = false,
 }: {
   request: GetPromptRequest;
   client: MongoClient;
@@ -50,6 +66,8 @@ export async function handleGetPromptRequest({
   isReadOnlyMode: boolean;
   signal?: AbortSignal;
   sendProgress?: SendProgressFn;
+  connectionId?: string;
+  showTarget?: boolean;
 }): Promise<GetPromptResult> {
   const { name, arguments: args = {} } = request.params;
 
@@ -90,7 +108,7 @@ export async function handleGetPromptRequest({
           content: {
             type: "text",
             text: `Please analyze the following MongoDB collection:
-Collection: ${collectionName}
+Collection: ${collectionName}${showTarget ? `\nConnection: ${connectionId}\nDatabase: ${db.databaseName}` : ""}
 
 Schema:
 ${JSON.stringify(schemaSample, null, 2)}

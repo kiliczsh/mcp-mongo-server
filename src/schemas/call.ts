@@ -18,6 +18,7 @@ import type {
   WriteConcern,
 } from "mongodb";
 import { ObjectId } from "mongodb";
+import type { Connections } from "../connections.js";
 
 // MongoDB return type interfaces
 interface BulkWriteError extends Error {
@@ -172,6 +173,7 @@ export async function handleCallToolRequest({
   isReadOnlyMode,
   allowCrossDb = false,
   allowServerJs = false,
+  connections,
   signal,
 }: {
   request: CallToolRequest;
@@ -180,6 +182,7 @@ export async function handleCallToolRequest({
   isReadOnlyMode: boolean;
   allowCrossDb?: boolean;
   allowServerJs?: boolean;
+  connections?: Connections;
   signal?: AbortSignal;
 }) {
   const { name, arguments: args = {} } = request.params;
@@ -207,9 +210,40 @@ export async function handleCallToolRequest({
   // Validate operation name. An unknown tool name is a protocol error
   // (InvalidParams); everything past this point reports failures as tool
   // execution errors so the model can see and correct them (SEP-1303).
-  validateOperation(operation);
+  if (
+    !connections ||
+    (name !== "listConnections" && name !== "listDatabases")
+  ) {
+    validateOperation(operation);
+  }
 
   try {
+    signal?.throwIfAborted();
+    if (connections && name === "listConnections") {
+      return formatResponse({ connections: connections.list() });
+    }
+    if (connections && name === "listDatabases") {
+      return formatResponse({
+        databases: await connections.listDatabases(args.connectionId),
+      });
+    }
+    if (connections && operation !== "convertTime") {
+      const target = await connections.resolve(args);
+      db = target.db;
+      isReadOnlyMode = target.isReadOnlyMode;
+      if (
+        connections.named &&
+        operation === "aggregate" &&
+        Array.isArray(args.pipeline)
+      ) {
+        const allowed = connections.allowedDatabases(target.connectionId);
+        checkNamedAggregationDatabases(
+          args.pipeline,
+          db.databaseName,
+          allowCrossDb ? allowed : [db.databaseName],
+        );
+      }
+    }
     // Check if operation is allowed in read-only mode
     checkReadOnlyMode(operation, isReadOnlyMode);
 
@@ -255,6 +289,52 @@ export async function handleCallToolRequest({
   }
 }
 
+function checkNamedAggregationDatabases(
+  pipeline: unknown[],
+  database: string,
+  allowed: readonly string[],
+  depth = 0,
+): void {
+  if (depth > MAX_OBJECT_DEPTH)
+    throw new Error("Aggregation pipeline nesting is too deep");
+  for (const stage of pipeline) {
+    if (!stage || typeof stage !== "object") continue;
+    const { $out, $merge, $lookup, $unionWith, $facet } = stage as Record<
+      string,
+      unknown
+    >;
+    for (const target of [$out, $merge, $lookup, $unionWith]) {
+      if (!target || typeof target !== "object") continue;
+      const value = target as Record<string, unknown>;
+      for (const reference of [value, value.into, value.from]) {
+        if (!reference || typeof reference !== "object" || !("db" in reference))
+          continue;
+        if (
+          typeof reference.db !== "string" ||
+          !allowed.includes(reference.db)
+        ) {
+          throw new Error(
+            `Aggregation references a database outside the allowed scope of '${database}'`,
+          );
+        }
+      }
+      if (Array.isArray(value.pipeline))
+        checkNamedAggregationDatabases(
+          value.pipeline,
+          database,
+          allowed,
+          depth + 1,
+        );
+    }
+    if ($facet && typeof $facet === "object") {
+      for (const nested of Object.values($facet)) {
+        if (Array.isArray(nested))
+          checkNamedAggregationDatabases(nested, database, allowed, depth + 1);
+      }
+    }
+  }
+}
+
 async function executeOperation(
   operation: MongoOperation,
   collection: Collection<Document> | null,
@@ -286,7 +366,13 @@ async function executeOperation(
         signal,
       );
     case "update":
-      return handleUpdate(collection, args, objectIdMode, allowServerJs, signal);
+      return handleUpdate(
+        collection,
+        args,
+        objectIdMode,
+        allowServerJs,
+        signal,
+      );
     case "serverInfo":
       return handleServerInfo(db, isReadOnlyMode, args, signal);
     case "insert":
@@ -306,7 +392,10 @@ async function executeOperation(
     case "convertTime":
       return handleConvertTime(args);
     default:
-      throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown tool: ${operation}`);
+      throw new ProtocolError(
+        ProtocolErrorCode.InvalidParams,
+        `Unknown tool: ${operation}`,
+      );
   }
 }
 
@@ -326,7 +415,10 @@ function validateOperation(operation: MongoOperation): void {
   ];
 
   if (!validOperations.includes(operation)) {
-    throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown tool: ${operation}`);
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      `Unknown tool: ${operation}`,
+    );
   }
 }
 

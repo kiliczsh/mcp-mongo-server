@@ -26,12 +26,29 @@ services:
       timeout: 5s
       retries: 30
 
+  authenticated:
+    image: mongo:8.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: test-admin
+      MONGO_INITDB_ROOT_PASSWORD: test-admin-password
+    ports:
+      - "127.0.0.1:37019:27017"
+    tmpfs:
+      - /data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "mongodb://test-admin:test-admin-password@authenticated:27017/admin", "--eval", "quit(db.runCommand({ping: 1}).ok === 1 ? 0 : 1)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
   seed:
     image: mongo:8.0
     depends_on:
       standalone:
         condition: service_healthy
       replica:
+        condition: service_healthy
+      authenticated:
         condition: service_healthy
     volumes:
       - ./tests/docker/seed.js:/seed.js:ro

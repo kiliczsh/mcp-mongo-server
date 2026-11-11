@@ -91,6 +91,7 @@ npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 --allowed-o
 | Variable | Description |
 |----------|-------------|
 | `MCP_MONGODB_URI` | MongoDB connection URI (alternative to the argument) |
+| `MCP_MONGODB_CONNECTIONS` | JSON object of named MongoDB connections and their database permissions |
 | `MCP_MONGODB_READONLY` | Enable read-only mode (`"true"`) |
 | `MCP_MONGODB_ALLOW_CROSS_DB` | Allow cross-database aggregation stages (`"true"`) |
 | `MCP_MONGODB_ALLOW_SERVER_JS` | Allow server-side JavaScript operators (`"true"`) |
@@ -99,13 +100,41 @@ npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 --allowed-o
 | `MCP_HTTP_JSON_LIMIT` | Max HTTP request body size (default `10mb`) |
 | `MCP_HTTP_AUTH_TOKEN` | Bearer token required to access the HTTP endpoint |
 
+### Named connections
+
+Set `MCP_MONGODB_CONNECTIONS` to a JSON string. This MCP client configuration
+uses a local build and the two [Docker test databases](docs/development.md#local-mongodb-test-environment).
+
+```json
+{
+  "mcpServers": {
+    "mongodb": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/mcp-mongo-server/build/index.js"
+      ],
+      "env": {
+        "MCP_MONGODB_CONNECTIONS": "{\"default\":{\"uri\":\"mongodb://127.0.0.1:37017/mcp_test\"},\"analytics\":{\"uri\":\"mongodb://127.0.0.1:37018/mcp_test?directConnection=true\",\"databases\":[\"mcp_test\",\"mcp_test_secondary\"],\"readOnly\":true}}"
+      }
+    }
+  }
+}
+```
+
+- Discover targets with `listConnections` and `listDatabases`. Pass `connectionId` and `database` to database tools and the collection analysis prompt. Omitted selectors use the `default` connection and its URI database.
+- Omit `databases` to allow only the URI database. If supplied, the list must include the URI database. Global read-only mode applies to every connection.
+- A positional URI or `MCP_MONGODB_URI` can supply `default` when the JSON contains only secondary connections. Named connections default to a 5-second server selection timeout. Set `serverSelectionTimeoutMS` in the URI to override it.
+- If a connection is offline, `resources/list` reports its ID and fails. Tools targeting other connections remain usable.
+
 ## Security
 
-**Database scope.** The server operates on the database in your connection
-string. Aggregation stages that reach another database (`$out`, `$merge`,
+**Database scope.** The server operates on the selected database.
+Named connections restrict selection to their configured databases.
+Aggregation stages that reach another database (`$out`, `$merge`,
 `$lookup` with an explicit `db`) are rejected by default, so a pipeline can't
 quietly read from or write to databases you didn't point it at. Enable them
-with `--allow-cross-db` if you need them.
+with `--allow-cross-db` if you need them. Named connections still enforce their
+database allowlist.
 
 **Server-side JavaScript.** The operators `$function`, `$where`, and
 `$accumulator` are blocked by default in aggregation pipelines and in the
