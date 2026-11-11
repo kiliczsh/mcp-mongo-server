@@ -115,6 +115,15 @@ function findAggOperator(
   return null;
 }
 
+function assertNoServerJs(value: unknown): void {
+  const operator = findAggOperator(value, SERVER_JS_AGG_OPERATORS);
+  if (operator) {
+    throw new Error(
+      `Server-side JavaScript operator '${operator}' is disabled by the current server policy.`,
+    );
+  }
+}
+
 /**
  * Scan an aggregation pipeline for stages that read from or write to a database
  * other than the connected one ($out, $merge, $lookup with an explicit `db`).
@@ -259,7 +268,13 @@ async function executeOperation(
 ) {
   switch (operation) {
     case "query":
-      return handleQuery(collection, args, objectIdMode, signal);
+      return handleQuery(
+        collection,
+        args,
+        objectIdMode,
+        allowServerJs && !isReadOnlyMode,
+        signal,
+      );
     case "aggregate":
       return handleAggregate(
         collection,
@@ -271,7 +286,7 @@ async function executeOperation(
         signal,
       );
     case "update":
-      return handleUpdate(collection, args, objectIdMode, signal);
+      return handleUpdate(collection, args, objectIdMode, allowServerJs, signal);
     case "serverInfo":
       return handleServerInfo(db, isReadOnlyMode, args, signal);
     case "insert":
@@ -279,7 +294,13 @@ async function executeOperation(
     case "createIndex":
       return handleCreateIndex(collection, args, objectIdMode, signal);
     case "count":
-      return handleCount(collection, args, objectIdMode, signal);
+      return handleCount(
+        collection,
+        args,
+        objectIdMode,
+        allowServerJs && !isReadOnlyMode,
+        signal,
+      );
     case "listCollections":
       return handleListCollections(db, args, objectIdMode, signal);
     case "convertTime":
@@ -575,6 +596,7 @@ async function handleQuery(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  allowServerJs = false,
   signal?: AbortSignal,
 ) {
   if (!collection) {
@@ -584,6 +606,11 @@ async function handleQuery(
   const limit = (args.limit as number) || 10;
   const skip = (args.skip as number) || 0;
   const queryFilter = parseFilter(filter, objectIdMode);
+
+  if (!allowServerJs) {
+    assertNoServerJs(queryFilter);
+  }
+
   try {
     if (explain) {
       signal?.throwIfAborted();
@@ -660,16 +687,8 @@ async function handleAggregate(
     }
   }
 
-  // Server-side JavaScript ($function/$where/$accumulator) is arbitrary code
-  // execution on the MongoDB server; reject it by default even outside
-  // read-only mode, unless explicitly enabled.
   if (!allowServerJs) {
-    const js = findAggOperator(pipeline, SERVER_JS_AGG_OPERATORS);
-    if (js) {
-      throw new Error(
-        `Server-side JavaScript operator '${js}' is not allowed. Enable it with --allow-server-js or MCP_MONGODB_ALLOW_SERVER_JS=true.`,
-      );
-    }
+    assertNoServerJs(pipeline);
   }
 
   // Keep the server scoped to its connected database: reject $out/$merge/$lookup
@@ -725,6 +744,7 @@ async function handleUpdate(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  allowServerJs = false,
   signal?: AbortSignal,
 ) {
   if (!collection) {
@@ -732,6 +752,10 @@ async function handleUpdate(
   }
   const { filter, update, upsert, multi } = args;
   const queryFilter = parseFilter(filter, objectIdMode);
+
+  if (!allowServerJs) {
+    assertNoServerJs(queryFilter);
+  }
 
   // Process update object for potential ObjectId strings
   let processedUpdate = update;
@@ -959,7 +983,7 @@ async function handleCreateIndex(
 
   // Validate commitQuorum
   if (
-    commitQuorum &&
+    commitQuorum !== undefined &&
     typeof commitQuorum !== "string" &&
     typeof commitQuorum !== "number"
   ) {
@@ -980,7 +1004,7 @@ async function handleCreateIndex(
   try {
     // Properly type createIndexes options
     const indexOptions: CreateIndexesOptions = {
-      commitQuorum: typeof commitQuorum === "number" ? commitQuorum : undefined,
+      commitQuorum,
     };
 
     signal?.throwIfAborted();
@@ -1004,6 +1028,7 @@ async function handleCount(
   collection: Collection<Document> | null,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
+  allowServerJs = false,
   signal?: AbortSignal,
 ) {
   if (!collection) {
@@ -1011,6 +1036,10 @@ async function handleCount(
   }
   const { query, limit, skip, hint, readConcern, maxTimeMS, collation } = args;
   const countQuery = parseFilter(query, objectIdMode);
+
+  if (!allowServerJs) {
+    assertNoServerJs(countQuery);
+  }
 
   try {
     // Build options object, removing undefined values
@@ -1115,20 +1144,10 @@ async function handleListCollections(
   const skip = (args.skip as number) || 0;
   const limit = (args.limit as number) || 20;
 
-  // Process ObjectId strings in filter if present
-  let processedFilter = filter;
-  if (filter && typeof filter === "object") {
-    processedFilter = processObjectIdInFilter(
-      filter as Record<string, unknown>,
-      objectIdMode,
-    );
-  }
-
   try {
-    // Get the list of collections
-    const options = processedFilter ? { filter: processedFilter } : {};
+    const processedFilter = parseFilter(filter, objectIdMode);
     signal?.throwIfAborted();
-    const collections = await db.listCollections(options).toArray();
+    const collections = await db.listCollections(processedFilter).toArray();
 
     // If nameOnly is true, return only the collection names
     const allResults = nameOnly

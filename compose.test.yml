@@ -1,0 +1,42 @@
+name: mcp-mongo-test
+
+services:
+  standalone:
+    image: mongo:8.0
+    ports:
+      - "127.0.0.1:37017:27017"
+    volumes:
+      - standalone-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping: 1}).ok === 1 ? 0 : 1)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  replica:
+    image: mongo:8.0
+    command: ["mongod", "--replSet", "mcp-test", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:37018:27017"
+    volumes:
+      - replica-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping: 1}).ok === 1 ? 0 : 1)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  seed:
+    image: mongo:8.0
+    depends_on:
+      standalone:
+        condition: service_healthy
+      replica:
+        condition: service_healthy
+    volumes:
+      - ./tests/docker/seed.js:/seed.js:ro
+    entrypoint: ["mongosh", "--nodb", "--quiet", "--file", "/seed.js"]
+
+volumes:
+  standalone-data:
+  replica-data:

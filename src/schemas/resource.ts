@@ -219,7 +219,7 @@ export async function handleReadResourceRequest({
         `Unsupported resource URI scheme '${url.protocol}': expected 'mongodb:'`,
       );
     }
-    collectionName = url.pathname.replace(/^\//, "");
+    collectionName = decodeURIComponent(url.pathname.replace(/^\//, ""));
   } catch (error) {
     if (error instanceof ProtocolError) throw error;
     throw new ProtocolError(
@@ -355,7 +355,7 @@ export async function handleListResourcesRequest({
     const collections = await db.listCollections().toArray();
 
     const allResources = collections.map((collection: CollectionInfo) => ({
-      uri: `mongodb:///${collection.name}`,
+      uri: `mongodb:///${encodeURIComponent(collection.name)}`,
       mimeType: "application/json",
       name: collection.name,
       description: `MongoDB collection: ${collection.name}`,

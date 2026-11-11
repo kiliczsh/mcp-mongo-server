@@ -107,14 +107,14 @@ string. Aggregation stages that reach another database (`$out`, `$merge`,
 quietly read from or write to databases you didn't point it at. Enable them
 with `--allow-cross-db` if you need them.
 
-**Server-side JavaScript.** The aggregation operators `$function`, `$where`,
-and `$accumulator` run arbitrary JavaScript on the MongoDB server. They are
-rejected by default; enable them with `--allow-server-js` if you trust the
-pipelines being run.
+**Server-side JavaScript.** The operators `$function`, `$where`, and
+`$accumulator` are blocked by default in aggregation pipelines and in the
+filters for `query`, `count`, and `update`. In read-write mode,
+`--allow-server-js` enables these operators.
 
-**Read-only mode** blocks every write path, including aggregation stages that
-write or run server-side JavaScript (`$out`, `$merge`, `$function`, `$where`,
-`$accumulator`).
+**Read-only mode** blocks writes, including the `$out` and `$merge`
+aggregation stages. It also blocks server-side JavaScript even when
+`--allow-server-js` is set.
 
 **Least privilege.** Application-level checks only go so far — the strongest
 guarantee comes from the database. Connect with a MongoDB user scoped to just

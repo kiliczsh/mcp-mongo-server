@@ -22,7 +22,7 @@ export async function handleListToolsRequest({
       {
         name: "query",
         description:
-          "Execute a MongoDB query with optional execution plan analysis",
+          "Find documents in one collection using a filter, projection, or sort. Use aggregate for grouping or joins. Request an execution plan to inspect the query.",
         inputSchema: {
           type: "object",
           properties: {
@@ -73,7 +73,7 @@ export async function handleListToolsRequest({
       {
         name: "aggregate",
         description:
-          "Execute a MongoDB aggregation pipeline with optional execution plan analysis",
+          "Run a MongoDB aggregation pipeline for grouping, joins, or multi-stage transformations. Request an execution plan to inspect the pipeline.",
         inputSchema: {
           type: "object",
           properties: {
@@ -107,7 +107,8 @@ export async function handleListToolsRequest({
       },
       {
         name: "update",
-        description: "Update documents in a MongoDB collection",
+        description:
+          "Modify matching documents using operators such as $set, $unset, or $inc. Enable multi to update all matches or upsert to create a document when the filter matches none.",
         inputSchema: {
           type: "object",
           properties: {
@@ -147,7 +148,7 @@ export async function handleListToolsRequest({
       {
         name: "serverInfo",
         description:
-          "Get MongoDB server information including version, storage engine, and other details",
+          "Inspect MongoDB server metadata such as version and storage engine. Enable includeDebugInfo for additional diagnostics.",
         inputSchema: {
           type: "object",
           properties: {
@@ -161,7 +162,8 @@ export async function handleListToolsRequest({
       },
       {
         name: "insert",
-        description: "Insert one or more documents into a MongoDB collection",
+        description:
+          "Insert new documents into a MongoDB collection. Use update to modify existing records.",
         inputSchema: {
           type: "object",
           properties: {
@@ -199,7 +201,8 @@ export async function handleListToolsRequest({
       },
       {
         name: "createIndex",
-        description: "Create one or more indexes on a MongoDB collection",
+        description:
+          "Create indexes to improve query performance, enforce uniqueness, or expire documents with a TTL index.",
         inputSchema: {
           type: "object",
           properties: {
@@ -250,8 +253,8 @@ export async function handleListToolsRequest({
               description: "Write concern for index creation",
             },
             commitQuorum: {
-              type: "string",
-              description: "Number of members required to create the index",
+              type: ["string", "number"],
+              description: "Replica-set commit quorum as a member count or a mode such as majority",
             },
             objectIdMode: {
               type: "string",
@@ -265,7 +268,8 @@ export async function handleListToolsRequest({
       },
       {
         name: "count",
-        description: "Count documents in a collection matching a query",
+        description:
+          "Count documents matching a filter in one collection. Use aggregate for counts grouped by field.",
         inputSchema: {
           type: "object",
           properties: {
@@ -295,7 +299,8 @@ export async function handleListToolsRequest({
       },
       {
         name: "listCollections",
-        description: "List all collections in the MongoDB database",
+        description:
+          "List collections in the connected database. Filter by name or other collection properties and request names only for a compact result.",
         inputSchema: {
           type: "object",
           properties: {
