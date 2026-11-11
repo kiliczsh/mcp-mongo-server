@@ -40,10 +40,9 @@ function uri(deployment) {
 
 before(async () => {
   for (const deployment of deployments) {
-    deployment.client = new MongoClient(uri(deployment), {
+    deployment.client = await MongoClient.connect(uri(deployment), {
       serverSelectionTimeoutMS: 3000,
     });
-    await deployment.client.connect();
     for (const database of databaseNames) {
       await deployment.client
         .db(database)
@@ -60,11 +59,10 @@ before(async () => {
     await database.createCollection(`paging_${String(index).padStart(2, "0")}`);
   }
 
-  authenticatedAdmin = new MongoClient(
+  authenticatedAdmin = await MongoClient.connect(
     `mongodb://test-admin:test-admin-password@${authenticatedHost}/admin`,
     { serverSelectionTimeoutMS: 3000 },
   );
-  await authenticatedAdmin.connect();
   for (const database of databaseNames) {
     await authenticatedAdmin
       .db(database)
@@ -297,6 +295,13 @@ for (const transport of ["stdio", "http"]) {
               },
             };
       await withServer(transport, configuration, async (client) => {
+        const { tools } = await client.listTools();
+        for (const name of ["insert", "update", "createIndex"]) {
+          assert.equal(
+            tools.some((tool) => tool.name === name),
+            false,
+          );
+        }
         const result = await data(client, "query", {
           collection,
           filter: { _id: "same-id" },
@@ -327,6 +332,35 @@ for (const transport of ["stdio", "http"]) {
       });
     });
   }
+
+  test(`write tools stay discoverable with a read-only default over ${transport}`, {
+    timeout: 30000,
+  }, async () => {
+    const configuration = namedConfiguration();
+    const entries = JSON.parse(configuration.env.MCP_MONGODB_CONNECTIONS);
+    entries.default.readOnly = true;
+    entries.analytics.readOnly = false;
+    configuration.env.MCP_MONGODB_CONNECTIONS = JSON.stringify(entries);
+    await withServer(transport, configuration, async (client) => {
+      const { tools } = await client.listTools();
+      for (const name of ["insert", "update", "createIndex"]) {
+        const tool = tools.find((tool) => tool.name === name);
+        assert.equal(tool.annotations.readOnlyHint, false);
+        assert.match(tool.description, /listConnections/);
+      }
+      const args = {
+        collection,
+        filter: { _id: "same-id" },
+        update: { $set: { changed: false } },
+      };
+      await expectToolError(client, "update", args);
+      assert.equal(
+        (await data(client, "update", { ...args, connectionId: "analytics" }))
+          .matchedCount,
+        1,
+      );
+    });
+  });
 
   test(`named connections over ${transport}`, {
     timeout: 60000,
@@ -507,6 +541,16 @@ test("global read-only policy over http", {
       filter: { _id: "same-id" },
       update: { $set: { changed: true } },
     });
+    const { tools } = await client.listTools();
+    assert.ok(
+      tools.every(
+        ({ name }) => !["insert", "update", "createIndex"].includes(name),
+      ),
+    );
+    assert.equal(
+      tools.find(({ name }) => name === "aggregate").annotations.readOnlyHint,
+      true,
+    );
     const document = await deployments[0].client
       .db(mainDatabase)
       .collection(collection)
@@ -668,3 +712,188 @@ test("aggregation writes respect database and connection policy", {
     }
   });
 });
+
+for (const transport of ["stdio", "http"]) {
+  test(`3.2.0 collection inspection and bounded queries over ${transport}`, {
+    timeout: 60000,
+  }, async (t) => {
+    const name = `inspection_${transport}`;
+    for (const deployment of deployments) {
+      const fixture = deployment.client.db(secondaryDatabase).collection(name);
+      const origin = deployment.id;
+      await fixture.insertMany([
+        ...[1, 2, 3].map((_id) => ({
+          _id,
+          origin,
+          group: "small",
+          payload: "ok",
+        })),
+        ...[4, 5, 6].map((_id) => ({
+          _id,
+          origin,
+          group: "wide",
+          payload: "é".repeat(160),
+        })),
+        { _id: 7, origin, group: "oversized", payload: "é".repeat(400) },
+      ]);
+      await fixture.createIndex(
+        { origin: 1, group: -1 },
+        { name: `origin_${origin}` },
+      );
+    }
+    const configuration = namedConfiguration();
+    Object.assign(configuration.env, {
+      MCP_MONGODB_MAX_RESULT_DOCUMENTS: "2",
+      MCP_MONGODB_MAX_RESULT_BYTES: "512",
+      MCP_MONGODB_QUERY_TIMEOUT_MS: "3000",
+    });
+
+    await withServer(transport, configuration, async (client) => {
+      const { tools } = await client.listTools();
+      for (const name of ["query", "aggregate"]) {
+        const { description } = tools.find((tool) => tool.name === name);
+        assert.match(description, /2 documents/);
+        assert.match(description, /512 bytes/);
+        assert.match(description, /3000 ms/);
+      }
+      for (const { id } of deployments) {
+        const target = {
+          connectionId: id,
+          database: secondaryDatabase,
+          collection: name,
+        };
+
+        await t.test(`index metadata comes from ${id}`, async () => {
+          const { indexes } = await data(client, "listIndexes", target);
+          assert.deepEqual(indexes.map(({ name }) => name).sort(), [
+            "_id_",
+            `origin_${id}`,
+          ]);
+          const index = indexes.find(({ name }) => name === `origin_${id}`);
+          assert.deepEqual(Object.entries(index.key), [
+            ["origin", 1],
+            ["group", -1],
+          ]);
+        });
+
+        await t.test(`schema matches the MCP resource on ${id}`, async () => {
+          const schema = await data(client, "collectionSchema", target);
+          const uri = `mongodb:///${encodeURIComponent(name)}?${new URLSearchParams(
+            {
+              connectionId: id,
+              database: secondaryDatabase,
+            },
+          )}`;
+          const resource = await client.readResource({ uri });
+          const resourceSchema = JSON.parse(resource.contents[0].text);
+          assert.equal(schema.name, name);
+          assert.equal(schema.documentCount, 7);
+          assert.ok(
+            schema.fields
+              .find((field) => field.name === "origin")
+              .examples.includes(id),
+          );
+          const signatures = ({ fields }) =>
+            fields
+              .map(({ name, types, nullable, prevalence }) => ({
+                name,
+                types,
+                nullable,
+                prevalence,
+              }))
+              .sort((a, b) => a.name.localeCompare(b.name));
+          assert.deepEqual(signatures(schema), signatures(resourceSchema));
+          assert.deepEqual(schema.indexes, resourceSchema.indexes);
+        });
+
+        await t.test(
+          `query keeps totals and caps documents on ${id}`,
+          async () => {
+            const args = {
+              ...target,
+              filter: { group: "small" },
+              sort: { _id: 1 },
+              limit: 5,
+            };
+            const result = await data(client, "query", args);
+            assert.deepEqual(
+              result.results.map(({ _id }) => _id),
+              [1, 2],
+            );
+            assert.equal(result.metadata.total, 3);
+            assert.equal(result.metadata.hasMore, true);
+            assert.equal(result.metadata.truncated, "documents");
+            const withoutTotal = await data(client, "query", {
+              ...args,
+              includeTotal: false,
+            });
+            assert.deepEqual(withoutTotal.results, result.results);
+            assert.equal(Object.hasOwn(withoutTotal.metadata, "total"), false);
+            assert.equal(withoutTotal.metadata.hasMore, true);
+
+            const findPlan = await data(client, "query", {
+              ...args,
+              explain: "queryPlanner",
+            });
+            assert.ok(findPlan.queryPlanner);
+            const aggregationPlan = await data(client, "aggregate", {
+              ...target,
+              pipeline: [{ $match: { group: "small" } }],
+              explain: "queryPlanner",
+            });
+            assert.ok(Array.isArray(aggregationPlan) && aggregationPlan[0]);
+          },
+        );
+
+        await t.test(
+          `aggregate caps documents and UTF-8 bytes on ${id}`,
+          async () => {
+            const pipeline = (group) => [
+              { $match: { group } },
+              { $sort: { _id: 1 } },
+            ];
+            const small = await data(client, "aggregate", {
+              ...target,
+              pipeline: pipeline("small"),
+            });
+            assert.deepEqual(
+              small.results.map(({ _id }) => _id),
+              [1, 2],
+            );
+            assert.equal(small.metadata.truncated, "documents");
+            const wide = await data(client, "aggregate", {
+              ...target,
+              pipeline: pipeline("wide"),
+            });
+            assert.deepEqual(
+              wide.results.map(({ _id }) => _id),
+              [4],
+            );
+            assert.ok(
+              Buffer.byteLength(JSON.stringify(wide.results), "utf8") <= 512,
+            );
+            assert.equal(wide.metadata.truncated, "bytes");
+            const oversized = await call(client, "query", {
+              ...target,
+              filter: { group: "oversized" },
+            });
+            assert.equal(oversized.isError, true);
+            assert.match(oversized.content[0].text, /byte|projection/i);
+          },
+        );
+      }
+
+      await t.test("inspection uses the database allowlist", async () => {
+        for (const tool of ["listIndexes", "collectionSchema"]) {
+          const denied = await call(client, tool, {
+            connectionId: "analytics",
+            database: blockedDatabase,
+            collection: name,
+          });
+          assert.equal(denied.isError, true);
+          assert.match(denied.content[0].text, /not allowed/);
+        }
+      });
+    });
+  });
+}

@@ -1,6 +1,6 @@
 {
   "name": "mcp-mongo-server",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "A Model Context Protocol server for MongoDB connections",
   "private": false,
   "type": "module",
@@ -21,7 +21,7 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
-    "test:connections": "bun test tests/connections.lifecycle.test.ts && node --test tests/connections.e2e.test.mjs",
+    "test:connections": "bun test tests/connections.lifecycle.test.ts tests/query-limits.test.ts && node --test tests/connections.e2e.test.mjs",
     "test:connections:legacy": "MCP_TEST_PROTOCOL=legacy node --test tests/connections.e2e.test.mjs",
     "lint:fix": "biome lint --write .",
     "check": "biome check --write .",

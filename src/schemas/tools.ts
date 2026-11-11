@@ -3,6 +3,9 @@ import type {
   ListToolsResult,
 } from "@modelcontextprotocol/server";
 import type { Db, MongoClient } from "mongodb";
+import type { QueryLimits } from "../query-limits.js";
+
+export const WRITE_OPERATIONS = new Set(["update", "insert", "createIndex"]);
 
 export async function handleListToolsRequest({
   request,
@@ -11,6 +14,8 @@ export async function handleListToolsRequest({
   isReadOnlyMode,
   signal,
   connectionSelection = false,
+  hasWritableConnection = !isReadOnlyMode,
+  queryLimits = {},
 }: {
   request: ListToolsRequest;
   client: MongoClient;
@@ -18,6 +23,8 @@ export async function handleListToolsRequest({
   isReadOnlyMode: boolean;
   signal?: AbortSignal;
   connectionSelection?: boolean;
+  hasWritableConnection?: boolean;
+  queryLimits?: QueryLimits;
 }): Promise<ListToolsResult> {
   const result: ListToolsResult = {
     tools: [
@@ -43,8 +50,15 @@ export async function handleListToolsRequest({
             },
             limit: {
               type: "number",
-              description: "Maximum number of documents to return",
+              description:
+                "Requested page size. Configured server caps may reduce the number returned.",
               default: 10,
+            },
+            includeTotal: {
+              type: "boolean",
+              description:
+                "Include the exact match count. Set false to skip counting.",
+              default: true,
             },
             skip: {
               type: "number",
@@ -335,6 +349,26 @@ export async function handleListToolsRequest({
           },
         },
       },
+      ...[
+        ["listIndexes", "List a collection's indexes, keys, and options."],
+        [
+          "collectionSchema",
+          "Infer a collection schema from sample documents and include its indexes.",
+        ],
+      ].map(([name, description]) => ({
+        name,
+        description,
+        inputSchema: {
+          type: "object" as const,
+          properties: {
+            collection: {
+              type: "string",
+              description: "Name of the collection to inspect",
+            },
+          },
+          required: ["collection"],
+        },
+      })),
       {
         name: "convertTime",
         description:
@@ -352,7 +386,35 @@ export async function handleListToolsRequest({
       },
     ],
   };
+  const configuredLimits = [
+    queryLimits.documents !== undefined && `${queryLimits.documents} documents`,
+    queryLimits.bytes !== undefined &&
+      `${queryLimits.bytes} bytes in the results array`,
+    queryLimits.timeoutMS !== undefined &&
+      `${queryLimits.timeoutMS} ms per MongoDB operation`,
+  ].filter(Boolean);
+  result.tools = result.tools.filter(
+    ({ name }) => hasWritableConnection || !WRITE_OPERATIONS.has(name),
+  );
   const { tools } = result;
+  for (const tool of tools) {
+    if (WRITE_OPERATIONS.has(tool.name)) {
+      tool.annotations = { ...tool.annotations, readOnlyHint: false };
+      if (connectionSelection) {
+        tool.description +=
+          " Select a writable connection with listConnections.";
+      }
+    }
+    if (tool.name === "aggregate" && !hasWritableConnection) {
+      tool.annotations = { ...tool.annotations, readOnlyHint: true };
+    }
+    if (
+      (tool.name === "query" || tool.name === "aggregate") &&
+      configuredLimits.length
+    ) {
+      tool.description += ` Configured limits include ${configuredLimits.join(", ")}.`;
+    }
+  }
   if (connectionSelection) {
     const connectionId = {
       type: "string",

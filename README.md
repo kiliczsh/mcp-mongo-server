@@ -14,7 +14,7 @@ A Model Context Protocol (MCP) server that lets AI assistants work with your Mon
 ## Why use it
 
 - **Talk to your database in plain language** — the assistant discovers your collections and their shape automatically.
-- **Safe by default** — turn on read-only mode to let an assistant explore without any risk of changing data.
+- **Read-only mode** — restrict write operations globally or per connection.
 - **Works everywhere** — connects to standalone, replica set, sharded, and Atlas deployments, over plain or TLS connections.
 
 ## Key Features
@@ -92,6 +92,9 @@ npx -y mcp-mongo-server "mongodb://..." --transport http --port 3001 --allowed-o
 |----------|-------------|
 | `MCP_MONGODB_URI` | MongoDB connection URI (alternative to the argument) |
 | `MCP_MONGODB_CONNECTIONS` | JSON object of named MongoDB connections and their database permissions |
+| `MCP_MONGODB_MAX_RESULT_DOCUMENTS` | Optional document cap for `query` and `aggregate` |
+| `MCP_MONGODB_MAX_RESULT_BYTES` | Optional UTF-8 byte cap for the compact JSON results array, minimum 2 |
+| `MCP_MONGODB_QUERY_TIMEOUT_MS` | Optional MongoDB operation timeout in milliseconds for `query`, `aggregate`, `listIndexes`, and query count and explain operations |
 | `MCP_MONGODB_READONLY` | Enable read-only mode (`"true"`) |
 | `MCP_MONGODB_ALLOW_CROSS_DB` | Allow cross-database aggregation stages (`"true"`) |
 | `MCP_MONGODB_ALLOW_SERVER_JS` | Allow server-side JavaScript operators (`"true"`) |
@@ -123,6 +126,7 @@ uses a local build and the two [Docker test databases](docs/development.md#local
 
 - Discover targets with `listConnections` and `listDatabases`. Pass `connectionId` and `database` to database tools and the collection analysis prompt. Omitted selectors use the `default` connection and its URI database.
 - Omit `databases` to allow only the URI database. If supplied, the list must include the URI database. Global read-only mode applies to every connection.
+- Write tools appear in tool discovery when at least one connection is writable. Use `listConnections` to choose a writable target.
 - A positional URI or `MCP_MONGODB_URI` can supply `default` when the JSON contains only secondary connections. Named connections default to a 5-second server selection timeout. Set `serverSelectionTimeoutMS` in the URI to override it.
 - If a connection is offline, `resources/list` reports its ID and fails. Tools targeting other connections remain usable.
 

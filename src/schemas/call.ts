@@ -19,6 +19,9 @@ import type {
 } from "mongodb";
 import { ObjectId } from "mongodb";
 import type { Connections } from "../connections.js";
+import { type QueryLimits, readResultPage } from "../query-limits.js";
+import { buildCollectionSchema } from "./resource.js";
+import { WRITE_OPERATIONS } from "./tools.js";
 
 // MongoDB return type interfaces
 interface BulkWriteError extends Error {
@@ -40,6 +43,8 @@ type MongoOperation =
   | "createIndex"
   | "count"
   | "listCollections"
+  | "listIndexes"
+  | "collectionSchema"
   | "convertTime";
 
 // Define operations that require a collection
@@ -50,10 +55,9 @@ const COLLECTION_OPERATIONS = [
   "insert",
   "createIndex",
   "count",
+  "listIndexes",
+  "collectionSchema",
 ];
-
-// Define write operations that are blocked in read-only mode
-const WRITE_OPERATIONS = ["update", "insert", "createIndex"];
 
 // Maximum object nesting depth we will walk when converting ObjectId/date
 // strings. Matches MongoDB's own BSON nesting limit, so we reject the same
@@ -174,6 +178,7 @@ export async function handleCallToolRequest({
   allowCrossDb = false,
   allowServerJs = false,
   connections,
+  queryLimits = {},
   signal,
 }: {
   request: CallToolRequest;
@@ -183,6 +188,7 @@ export async function handleCallToolRequest({
   allowCrossDb?: boolean;
   allowServerJs?: boolean;
   connections?: Connections;
+  queryLimits?: QueryLimits;
   signal?: AbortSignal;
 }) {
   const { name, arguments: args = {} } = request.params;
@@ -267,6 +273,24 @@ export async function handleCallToolRequest({
 
     signal?.throwIfAborted();
 
+    if (
+      collection &&
+      (operation === "listIndexes" || operation === "collectionSchema")
+    ) {
+      const target = `${db.databaseName}.${collection.collectionName}`;
+      try {
+        const options = { signal, timeoutMS: queryLimits.timeoutMS };
+        return formatResponse(
+          operation === "listIndexes"
+            ? { indexes: await collection.indexes(options) }
+            : await buildCollectionSchema(db, collection, signal),
+        );
+      } catch (error) {
+        signal?.throwIfAborted();
+        return handleError(error, operation, target);
+      }
+    }
+
     return await executeOperation(
       operation,
       collection,
@@ -276,6 +300,7 @@ export async function handleCallToolRequest({
       allowServerJs,
       args,
       objectIdMode,
+      queryLimits,
       signal,
     );
   } catch (error) {
@@ -344,6 +369,7 @@ async function executeOperation(
   allowServerJs: boolean,
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode,
+  queryLimits: QueryLimits,
   signal?: AbortSignal,
 ) {
   switch (operation) {
@@ -353,6 +379,7 @@ async function executeOperation(
         args,
         objectIdMode,
         allowServerJs && !isReadOnlyMode,
+        queryLimits,
         signal,
       );
     case "aggregate":
@@ -363,6 +390,7 @@ async function executeOperation(
         isReadOnlyMode,
         allowCrossDb,
         allowServerJs,
+        queryLimits,
         signal,
       );
     case "update":
@@ -411,6 +439,8 @@ function validateOperation(operation: MongoOperation): void {
     "createIndex",
     "count",
     "listCollections",
+    "listIndexes",
+    "collectionSchema",
     "convertTime",
   ];
 
@@ -433,7 +463,7 @@ function validateCollection(collection: Collection<Document>): void {
 }
 
 function checkReadOnlyMode(operation: string, isReadOnlyMode: boolean): void {
-  if (isReadOnlyMode && WRITE_OPERATIONS.includes(operation)) {
+  if (isReadOnlyMode && WRITE_OPERATIONS.has(operation)) {
     throw new Error(
       `ReadonlyError: Operation '${operation}' is not allowed in read-only mode`,
     );
@@ -689,12 +719,15 @@ async function handleQuery(
   args: Record<string, unknown>,
   objectIdMode: ObjectIdConversionMode = "auto",
   allowServerJs = false,
+  limits: QueryLimits = {},
   signal?: AbortSignal,
 ) {
   if (!collection) {
     throw new Error("Collection is required for query operation");
   }
-  const { filter, projection, explain, sort } = args;
+  const { filter, projection, explain, sort, includeTotal = true } = args;
+  if (typeof includeTotal !== "boolean")
+    throw new Error("includeTotal must be a boolean");
   const limit = (args.limit as number) || 10;
   const skip = (args.skip as number) || 0;
   const queryFilter = parseFilter(filter, objectIdMode);
@@ -712,6 +745,8 @@ async function handleQuery(
           limit,
           skip,
           sort,
+          signal,
+          timeoutMS: limits.timeoutMS,
         } as FindOptions)
         .explain(explain as string);
 
@@ -719,29 +754,64 @@ async function handleQuery(
     }
 
     signal?.throwIfAborted();
-    const [total, results] = await Promise.all([
-      collection.countDocuments(queryFilter),
-      collection
-        .find(queryFilter, {
-          projection,
-          limit,
-          skip,
-          sort,
-        } as FindOptions)
-        .toArray(),
-    ]);
+    const bounded =
+      limits.documents !== undefined ||
+      limits.bytes !== undefined ||
+      !includeTotal;
+    const pageSize = Math.abs(limit);
+    if (bounded && !Number.isSafeInteger(limit)) {
+      throw new Error("limit must be an integer");
+    }
+    const pageRows = Math.min(pageSize, limits.documents ?? Infinity);
+    const fetchLimit = bounded
+      ? Math.sign(limit) * Math.min(pageRows + 1, Number.MAX_SAFE_INTEGER)
+      : limit;
+    const cancelPeer = new AbortController();
+    const operationSignal = signal
+      ? AbortSignal.any([signal, cancelPeer.signal])
+      : cancelPeer.signal;
+    const options = { signal: operationSignal, timeoutMS: limits.timeoutMS };
+    const cursor = collection.find(queryFilter, {
+      projection,
+      limit: fetchLimit,
+      skip,
+      sort,
+      ...options,
+    } as FindOptions);
+    const read = bounded
+      ? readResultPage(cursor, limits, pageSize, operationSignal)
+      : cursor.toArray().then((results) => ({
+          results,
+          hasMore: false,
+          truncated: undefined,
+        }));
+    const count = includeTotal
+      ? collection.countDocuments(queryFilter, options)
+      : undefined;
+    const [total, page] = await Promise.all([count, read]).catch(
+      async (error) => {
+        cancelPeer.abort(error);
+        await Promise.allSettled([count, read]);
+        throw error;
+      },
+    );
 
     return formatResponse({
-      results,
+      results: page.results,
       metadata: {
-        total,
-        returned: results.length,
+        ...(total !== undefined ? { total } : {}),
+        returned: page.results.length,
         skip,
         limit,
-        hasMore: skip + results.length < total,
+        hasMore:
+          total === undefined
+            ? page.hasMore
+            : page.hasMore || skip + page.results.length < total,
+        ...(page.truncated ? { truncated: page.truncated } : {}),
       },
     });
   } catch (error) {
+    signal?.throwIfAborted();
     return handleError(error, "query", collection.collectionName);
   }
 }
@@ -753,6 +823,7 @@ async function handleAggregate(
   isReadOnlyMode = false,
   allowCrossDb = false,
   allowServerJs = false,
+  limits: QueryLimits = {},
   signal?: AbortSignal,
 ) {
   if (!collection) {
@@ -813,6 +884,8 @@ async function handleAggregate(
           explain: {
             verbosity: explain as string,
           },
+          signal,
+          timeoutMS: limits.timeoutMS,
         })
         .toArray();
 
@@ -820,14 +893,23 @@ async function handleAggregate(
     }
 
     signal?.throwIfAborted();
-    const results = await collection.aggregate(processedPipeline).toArray();
+    const cursor = collection.aggregate(processedPipeline, {
+      signal,
+      timeoutMS: limits.timeoutMS,
+    });
+    const { results, truncated } =
+      limits.documents !== undefined || limits.bytes !== undefined
+        ? await readResultPage(cursor, limits, Infinity, signal)
+        : { results: await cursor.toArray(), truncated: undefined };
     return formatResponse({
       results,
       metadata: {
         returned: results.length,
+        ...(truncated ? { truncated } : {}),
       },
     });
   } catch (error) {
+    signal?.throwIfAborted();
     return handleError(error, "aggregate", collection.collectionName);
   }
 }

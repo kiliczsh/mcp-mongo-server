@@ -5,6 +5,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createMcpExpressApp } from "@modelcontextprotocol/express";
 import type { MongoClient } from "mongodb";
 import { Connections } from "./connections.js";
+import { readQueryLimits, type QueryLimits } from "./query-limits.js";
 import { createServer } from "./server.js";
 
 let connections: Connections | undefined;
@@ -78,6 +79,7 @@ async function main() {
   }
 
   try {
+    const queryLimits = readQueryLimits(process.env);
     connections = new Connections(
       connectionUrl,
       process.env.MCP_MONGODB_CONNECTIONS,
@@ -92,6 +94,7 @@ async function main() {
         allowCrossDb,
         allowServerJs,
         connections,
+        queryLimits,
         port,
         allowedOrigins,
         jsonLimit,
@@ -105,10 +108,11 @@ async function main() {
         allowCrossDb,
         allowServerJs,
         connections,
+        queryLimits,
       );
     }
   } catch (error) {
-    console.error("Failed to connect to MongoDB:", error);
+    console.error("Failed to start MongoDB MCP server:", error);
     await connections?.close();
     process.exit(1);
   }
@@ -124,6 +128,7 @@ async function startStdioServer(
   allowCrossDb: boolean,
   allowServerJs: boolean,
   connections: Connections,
+  queryLimits: QueryLimits,
 ) {
   // serveStdio owns the era decision: a 2026-07-28 client opening is served the
   // modern protocol, a 2025-era opening is served via the legacy shim — one
@@ -137,6 +142,7 @@ async function startStdioServer(
       allowServerJs,
       {},
       connections,
+      queryLimits,
     ),
   );
   console.warn("Server connected successfully via stdio");
@@ -201,6 +207,7 @@ async function startHttpServer(
   allowCrossDb: boolean,
   allowServerJs: boolean,
   connections: Connections,
+  queryLimits: QueryLimits,
   port: number,
   allowedOrigins: string[],
   jsonLimit: string,
@@ -283,6 +290,7 @@ async function startHttpServer(
       allowServerJs,
       {},
       connections,
+      queryLimits,
     ),
   );
   const nodeHandler = toNodeHandler(mcpHandler, {

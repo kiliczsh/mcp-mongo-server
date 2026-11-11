@@ -6,6 +6,7 @@ import {
 import type { Notification } from "@modelcontextprotocol/server";
 import type { Db, MongoClient } from "mongodb";
 import { type Connections, resourceSelectors } from "./connections.js";
+import type { QueryLimits } from "./query-limits.js";
 import { handleCallToolRequest } from "./schemas/call.js";
 import { handleCompletionRequest } from "./schemas/completion.js";
 import { handlePingRequest } from "./schemas/ping.js";
@@ -54,13 +55,14 @@ export function createServer(
   allowServerJs = false,
   options = {},
   connections?: Connections,
+  queryLimits?: QueryLimits,
 ) {
   const defaultTarget = { client, db, isReadOnlyMode };
   const server = new Server(
     {
       name: "mongodb",
       title: "MongoDB MCP Server",
-      version: "3.1.0",
+      version: "3.2.0",
       description:
         "MCP server for MongoDB: query, aggregate, and manage collections with read-only mode, progress notifications, and cancellation",
       websiteUrl: "https://github.com/kiliczsh/mcp-mongo-server",
@@ -137,6 +139,10 @@ export function createServer(
       db,
       isReadOnlyMode,
       connectionSelection: !!connections,
+      hasWritableConnection: connections
+        ?.list()
+        .some(({ readOnly }) => !readOnly),
+      queryLimits,
       signal: ctx.mcpReq.signal,
     }),
   );
@@ -153,6 +159,7 @@ export function createServer(
       allowCrossDb,
       allowServerJs,
       connections,
+      queryLimits,
       signal: ctx.mcpReq.signal,
     }),
   );

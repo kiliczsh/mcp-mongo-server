@@ -5,10 +5,12 @@ import {
   type ReadResourceRequest,
 } from "@modelcontextprotocol/server";
 import type {
+  Collection,
   CollectionInfo,
   Db,
   Document,
   IndexDescriptionInfo,
+  ListIndexesOptions,
   MongoClient,
 } from "mongodb";
 import { ObjectId } from "mongodb";
@@ -234,7 +236,7 @@ export async function handleReadResourceRequest({
       "Resource URI is missing a collection name",
     );
   }
-  if (collectionName.startsWith("system.")) {
+  if (collectionName.toLowerCase().startsWith("system.")) {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidParams,
       "Access to system collections is not allowed",
@@ -242,79 +244,12 @@ export async function handleReadResourceRequest({
   }
 
   try {
-    const collection = db.collection(collectionName);
-
-    // Set sample size for schema inference
-    const sampleSize = 100;
-    let sampleDocuments: Document[] = [];
-
-    await sendProgress?.(1, 4, "Sampling documents");
-    try {
-      // First try using MongoDB's $sample aggregation to get a diverse set of documents
-      signal?.throwIfAborted();
-      sampleDocuments = await collection
-        .aggregate([{ $sample: { size: sampleSize } }])
-        .toArray();
-    } catch (sampleError) {
-      // Fallback to sequential scan if $sample is not available
-      console.warn(
-        `$sample aggregation failed for ${collectionName}, falling back to sequential scan: ${sampleError}`,
-      );
-      signal?.throwIfAborted();
-      sampleDocuments = await collection.find({}).limit(sampleSize).toArray();
-    }
-
-    // Get indexes for the collection
-    await sendProgress?.(2, 4, "Getting indexes");
-    signal?.throwIfAborted();
-    const indexes = await collection.indexes();
-
-    // Infer schema from samples
-    const inferredSchema = inferSchemaFromSamples(sampleDocuments);
-
-    // Get document count with timeout protection
-    await sendProgress?.(3, 4, "Counting documents");
-    let documentCount: number | string | null = null;
-    try {
-      // Set a timeout for the count operation
-      signal?.throwIfAborted();
-      documentCount = await Promise.race([
-        collection.countDocuments(),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error("Count operation timed out")),
-            5000,
-          ),
-        ),
-      ]);
-    } catch (countError) {
-      console.warn(
-        `Count operation failed or timed out for ${collectionName}: ${countError}`,
-      );
-      // Estimate count based on sample size and collection stats
-      try {
-        signal?.throwIfAborted();
-        const stats = await db.command({ collStats: collectionName });
-        documentCount = stats.count;
-      } catch {
-        documentCount = "unknown (count operation timed out)";
-      }
-    }
-
-    await sendProgress?.(4, 4, "Done");
-
-    const schema: CollectionSchema = {
-      type: "collection",
-      name: collectionName,
-      fields: inferredSchema.fields,
-      indexes: indexes.map((idx: IndexDescriptionInfo) => ({
-        name: idx.name,
-        keys: idx.key,
-      })),
-      documentCount: documentCount,
-      sampleSize: sampleDocuments.length,
-      lastUpdated: new Date().toISOString(),
-    };
+    const schema = await buildCollectionSchema(
+      db,
+      db.collection(collectionName),
+      signal,
+      sendProgress,
+    );
 
     return {
       contents: [
@@ -326,6 +261,7 @@ export async function handleReadResourceRequest({
       ],
     };
   } catch (error) {
+    signal?.throwIfAborted();
     if (error instanceof Error) {
       throw new Error(
         `Failed to read collection ${collectionName}: ${error.message}`,
@@ -335,6 +271,92 @@ export async function handleReadResourceRequest({
       `Failed to read collection ${collectionName}: Unknown error`,
     );
   }
+}
+
+export async function buildCollectionSchema(
+  db: Db,
+  collection: Collection<Document>,
+  signal?: AbortSignal,
+  sendProgress?: SendProgressFn,
+): Promise<CollectionSchema> {
+  const collectionName = collection.collectionName;
+  // Set sample size for schema inference
+  const sampleSize = 100;
+  let sampleDocuments: Document[] = [];
+
+  await sendProgress?.(1, 4, "Sampling documents");
+  try {
+    // First try using MongoDB's $sample aggregation to get a diverse set of documents
+    sampleDocuments = await collection
+      .aggregate([{ $sample: { size: sampleSize } }], { signal })
+      .toArray();
+  } catch (sampleError) {
+    signal?.throwIfAborted();
+    // Fallback to sequential scan if $sample is not available
+    console.warn(
+      `$sample aggregation failed for ${collectionName}, falling back to sequential scan: ${sampleError}`,
+    );
+    signal?.throwIfAborted();
+    sampleDocuments = await collection
+      .find({}, { signal })
+      .limit(sampleSize)
+      .toArray();
+  }
+
+  // Get indexes for the collection
+  await sendProgress?.(2, 4, "Getting indexes");
+  signal?.throwIfAborted();
+  const indexOptions: ListIndexesOptions & { signal?: AbortSignal } = {
+    signal,
+  };
+  const indexes = await collection.indexes(indexOptions);
+
+  // Infer schema from samples
+  const inferredSchema = inferSchemaFromSamples(sampleDocuments);
+
+  // Get document count with timeout protection
+  await sendProgress?.(3, 4, "Counting documents");
+  let documentCount: number | string | null = null;
+  try {
+    // Set a timeout for the count operation
+    signal?.throwIfAborted();
+    documentCount = await collection.countDocuments(
+      {},
+      { timeoutMS: 5000, signal },
+    );
+  } catch (countError) {
+    signal?.throwIfAborted();
+    console.warn(
+      `Count operation failed or timed out for ${collectionName}: ${countError}`,
+    );
+    // Estimate count based on sample size and collection stats
+    try {
+      signal?.throwIfAborted();
+      const stats = await db.command(
+        { collStats: collectionName },
+        { timeoutMS: 5000, signal },
+      );
+      documentCount = stats.count;
+    } catch {
+      signal?.throwIfAborted();
+      documentCount = "unknown (count operation timed out)";
+    }
+  }
+
+  await sendProgress?.(4, 4, "Done");
+
+  return {
+    type: "collection",
+    name: collectionName,
+    fields: inferredSchema.fields,
+    indexes: indexes.map((idx: IndexDescriptionInfo) => ({
+      name: idx.name,
+      keys: idx.key,
+    })),
+    documentCount: documentCount,
+    sampleSize: sampleDocuments.length,
+    lastUpdated: new Date().toISOString(),
+  };
 }
 
 export async function handleListResourcesRequest({
