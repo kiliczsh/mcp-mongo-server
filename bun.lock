@@ -8,7 +8,7 @@
         "@modelcontextprotocol/express": "^2.0.0",
         "@modelcontextprotocol/node": "^2.0.0",
         "@modelcontextprotocol/server": "^2.0.0",
-        "mongodb": "^7.5.0",
+        "mongodb": "7.5.0",
       },
       "devDependencies": {
         "@biomejs/biome": "^2.5.5",

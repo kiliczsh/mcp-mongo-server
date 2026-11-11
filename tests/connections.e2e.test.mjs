@@ -609,19 +609,11 @@ test("invalid named configurations fail startup", {
   }
 });
 
-test("an offline connection can recover without restarting the MCP server", {
-  timeout: 30000,
-}, async () => {
-  const port = await unusedPort();
-  const configuration = namedConfiguration();
-  const entries = JSON.parse(configuration.env.MCP_MONGODB_CONNECTIONS);
-  entries.analytics.uri =
-    entries.analytics.uri.replace(":37018/", `:${port}/`) +
-    "&SERVERSELECTIONTIMEOUTMS=250";
-  configuration.env.MCP_MONGODB_CONNECTIONS = JSON.stringify(entries);
+function mongoProxy(upstreamPort) {
+  let stalled = false;
   const sockets = new Set();
-  const proxy = net.createServer((downstream) => {
-    const upstream = net.connect(37018, "127.0.0.1");
+  const server = net.createServer((downstream) => {
+    const upstream = net.connect(upstreamPort, "127.0.0.1");
     for (const socket of [downstream, upstream]) {
       sockets.add(socket);
       socket.on("error", () => {
@@ -632,8 +624,36 @@ test("an offline connection can recover without restarting the MCP server", {
         sockets.delete(socket);
       });
     }
-    downstream.pipe(upstream).pipe(downstream);
+    downstream.pipe(upstream);
+    upstream.on("data", (chunk) => {
+      if (!stalled) downstream.write(chunk);
+    });
   });
+  return {
+    server,
+    stallReplies() {
+      stalled = true;
+    },
+    async close() {
+      for (const socket of sockets) socket.destroy();
+      if (server.listening) {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    },
+  };
+}
+
+test("an offline connection can recover without restarting the MCP server", {
+  timeout: 30000,
+}, async () => {
+  const port = await unusedPort();
+  const configuration = namedConfiguration();
+  const entries = JSON.parse(configuration.env.MCP_MONGODB_CONNECTIONS);
+  entries.analytics.uri =
+    entries.analytics.uri.replace(":37018/", `:${port}/`) +
+    "&SERVERSELECTIONTIMEOUTMS=250";
+  configuration.env.MCP_MONGODB_CONNECTIONS = JSON.stringify(entries);
+  const proxy = mongoProxy(37018);
   try {
     await withServer("http", configuration, async (client) => {
       assert.equal(
@@ -654,8 +674,8 @@ test("an offline connection can recover without restarting the MCP server", {
       assert.equal((await data(client, "count", { collection })).count, 1);
       await assert.rejects(client.listResources(), /analytics/);
       assert.equal((await data(client, "count", { collection })).count, 1);
-      proxy.listen(port, "127.0.0.1");
-      await once(proxy, "listening");
+      proxy.server.listen(port, "127.0.0.1");
+      await once(proxy.server, "listening");
       const result = await data(client, "query", {
         connectionId: "analytics",
         collection,
@@ -663,8 +683,7 @@ test("an offline connection can recover without restarting the MCP server", {
       assert.equal(result.results[0].origin, `analytics/${mainDatabase}`);
     });
   } finally {
-    for (const socket of sockets) socket.destroy();
-    if (proxy.listening) await new Promise((resolve) => proxy.close(resolve));
+    await proxy.close();
   }
 });
 
@@ -714,7 +733,43 @@ test("aggregation writes respect database and connection policy", {
 });
 
 for (const transport of ["stdio", "http"]) {
-  test(`3.2.0 collection inspection and bounded queries over ${transport}`, {
+  test(`query timeout while MongoDB is waiting to reply over ${transport}`, {
+    timeout: 30000,
+  }, async () => {
+    const configuration = namedConfiguration();
+    const entries = JSON.parse(configuration.env.MCP_MONGODB_CONNECTIONS);
+    const proxies = deployments.map(({ port }) => mongoProxy(port));
+    try {
+      for (const [index, { id, port }] of deployments.entries()) {
+        const { server } = proxies[index];
+        server.listen(0, "127.0.0.1");
+        await once(server, "listening");
+        entries[id].uri = entries[id].uri.replace(
+          `:${port}/`,
+          `:${server.address().port}/`,
+        );
+      }
+      configuration.env.MCP_MONGODB_CONNECTIONS = JSON.stringify(entries);
+      configuration.env.MCP_MONGODB_QUERY_TIMEOUT_MS = "250";
+      await withServer(transport, configuration, async (client) => {
+        for (const [index, { id }] of deployments.entries()) {
+          const args = { connectionId: id, collection, includeTotal: false };
+          assert.equal((await data(client, "query", args)).results.length, 1);
+          proxies[index].stallReplies();
+          const result = await client.callTool(
+            { name: "query", arguments: args },
+            { timeout: 2000 },
+          );
+          assert.equal(result.isError, true);
+          assert.match(result.content[0].text, /timeout|timed out/i);
+        }
+      });
+    } finally {
+      await Promise.all(proxies.map((proxy) => proxy.close()));
+    }
+  });
+
+  test(`collection inspection and bounded queries over ${transport}`, {
     timeout: 60000,
   }, async (t) => {
     const name = `inspection_${transport}`;

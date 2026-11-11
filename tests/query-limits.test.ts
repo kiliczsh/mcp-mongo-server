@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { createRequire } from "node:module";
 import { connect, createServer, type Socket } from "node:net";
 import { test } from "bun:test";
 import { MongoClient } from "mongodb";
 import { readQueryLimits, readResultPage } from "../src/query-limits.js";
 import { handleCallToolRequest } from "../src/schemas/call.js";
+
+test("the npm manifest pins the MongoDB driver exercised by the timeout tests", () => {
+  const require = createRequire(import.meta.url);
+  const { dependencies } = require("../package.json");
+  const { version } = require("mongodb/package.json");
+  assert.equal(dependencies.mongodb, version);
+});
 
 test("query limit configuration accepts only positive integers", () => {
   assert.equal(readQueryLimits({}).timeoutMS, undefined);
