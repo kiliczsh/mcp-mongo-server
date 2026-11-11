@@ -10,3 +10,4 @@ inspector-config.json
 
 # Local MCP config with test credentials
 .mcp.json
+/node-compile-cache

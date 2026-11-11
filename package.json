@@ -1,6 +1,6 @@
 {
   "name": "mcp-mongo-server",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "A Model Context Protocol server for MongoDB connections",
   "private": false,
   "type": "module",

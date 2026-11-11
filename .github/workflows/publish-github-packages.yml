@@ -2,7 +2,7 @@ name: Publish @kiliczsh/mcp-mongo-server
 
 on:
   release:
-    types: [created]
+    types: [published]
   pull_request:
     branches: [main]
   push:
@@ -22,6 +22,7 @@ jobs:
 
   publish-gpr:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     permissions:
@@ -29,7 +30,6 @@ jobs:
       packages: write
 
     env:
-      STATIC_VERSION: "2.0.2"
       BUILD_ID: ${{ github.run_number }}
 
     steps:
@@ -43,16 +43,21 @@ jobs:
         run: cp .npmrc-github .npmrc
       - name: Determine Version
         run: |
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            VERSION="${{ github.event.release.tag_name }}"
-          elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
-            VERSION="${STATIC_VERSION}-main.${BUILD_ID}"
+          PACKAGE_VERSION=$(node -p 'require("./package.json").version')
+          DIST_TAG=next
+          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+            test "$GITHUB_REF_NAME" = "$PACKAGE_VERSION"
+            VERSION="$PACKAGE_VERSION"
+            DIST_TAG=latest
+          elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            VERSION="${PACKAGE_VERSION}-main.${BUILD_ID}"
           else
-            VERSION="${STATIC_VERSION}-build.${BUILD_ID}"
+            VERSION="${PACKAGE_VERSION}-build.${BUILD_ID}"
           fi
 
           echo "Using version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "DIST_TAG=$DIST_TAG" >> $GITHUB_ENV
 
       - name: Create Git Tag
         if: github.event_name != 'release'
@@ -79,6 +84,6 @@ jobs:
       - name: Build
         run: bun run build
       - name: Publish package to GitHub Packages
-        run: npm publish --registry=https://npm.pkg.github.com
+        run: npm publish --tag "$DIST_TAG" --registry=https://npm.pkg.github.com
         env:
           NODE_AUTH_TOKEN: ${{secrets.NODE_AUTH_TOKEN}}
